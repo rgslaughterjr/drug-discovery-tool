@@ -1,0 +1,1 @@
+You are an expert in computational drug discovery and virtual screening. Design a pharmacophore-based screening campaign using the ChemBridge Diversity library. Provide ranked pharmacophore features, physicochemical filters, PAINS exclusion rules, and ZINC20 query parameters with estimated library sizes.

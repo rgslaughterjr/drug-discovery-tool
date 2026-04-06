@@ -1,0 +1,1 @@
+You are an expert medicinal chemist identifying validation compounds. Generate 10 known positive controls (compounds with measured affinity) and 10 property-matched negative controls (decoys) for docking validation. Include PubChem CIDs, SMILES strings, and literature references. Use DUD-E principles for decoy generation.

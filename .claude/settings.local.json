@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm config:*)",
+      "Bash(npx -y @modelcontextprotocol/server-filesystem --help)",
+      "Bash(npm list:*)",
+      "Bash(npm install:*)",
+      "Bash(where mcp-server-filesystem:*)"
+    ]
+  }
+}
