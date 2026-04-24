@@ -104,8 +104,37 @@
 
 ---
 
-## Phase 3: Chat Integration
-**Status:** 📋 PENDING PHASE 2 ✅
+## Phase 3: Chat Integration & Backend Connection ✅ COMPLETE
+
+**Status:** ChatInterface, SessionBadge, and full E2E integration implemented.
+
+**Deliverables:**
+- `web/src/utils/apiClient.ts` — Axios wrapper with X-Session-ID injection
+- `web/src/components/ChatInterface.tsx` — Message display + input + workflow routing
+- `web/src/components/ChatInterface.css` — Chat styling (responsive, animations)
+- `web/src/components/SessionBadge.tsx` — Top-right expiry timer + End Session modal
+- `web/src/components/SessionBadge.css` — Badge styling
+- Updated `web/src/App.tsx` — Full app layout (header, chat, badge)
+
+**Key Features:**
+- ✅ apiClient: Axios wrapper with X-Session-ID header + 401 redirect
+- ✅ ChatInterface: Message display (user/assistant), input, send button
+- ✅ NLP parsing: Client-side keyword routing (evaluate, controls, screening, hits)
+- ✅ Workflow integration: Calls all 4 backend endpoints (evaluate-target, get-controls, prep-screening, analyze-hits)
+- ✅ Loading state: Spinner during API calls
+- ✅ Error display: User-friendly error messages
+- ✅ SessionBadge: Shows provider + expiry countdown, End Session button
+- ✅ Confirmation modal: "All data will be deleted" warning before logout
+- ✅ Welcome message: Example prompts for users
+
+**Architecture:**
+- apiClient automatically injects X-Session-ID header
+- 401 response triggers redirect to login
+- Async/await for workflow calls
+- Message history stored in React state
+- Smooth scrolling to latest message
+
+**Next:** Phase 4 - Testing & Security validation
 
 ---
 
