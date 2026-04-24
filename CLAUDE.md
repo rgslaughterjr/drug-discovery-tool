@@ -66,8 +66,41 @@
 
 ---
 
-## Phase 2: Frontend Setup
-**Status:** 📋 PENDING PHASE 1 ✅
+## Phase 2: Frontend Setup ✅ COMPLETE
+
+**Status:** React project scaffolding + LoginModal + SessionContext implemented.
+
+**Deliverables:**
+- `web/package.json` — Dependencies (React 18, TypeScript, Axios)
+- `web/tsconfig.json` — TypeScript configuration
+- `web/public/index.html` — HTML entry point with base styles
+- `web/src/context/SessionContext.tsx` — Session state management (React Context)
+- `web/src/hooks/useSessionCleanup.ts` — Cleanup hook (beforeunload + inactivity timeout)
+- `web/src/components/LoginModal.tsx` — Login form + API integration
+- `web/src/components/LoginModal.css` — Styled login modal
+- `web/src/App.tsx` — Main app (conditional render based on session)
+- `web/src/App.css` — App styling
+- `web/src/index.tsx` — React entry point
+- `web/.env.example` — Environment variables template
+- `web/.gitignore` — Exclude node_modules, .env, etc.
+
+**Key Features:**
+- ✅ SessionContext: Holds session_id, provider, model, expiresIn (no API key stored)
+- ✅ LoginModal: 7 provider options, API key input (masked), model field (editable)
+- ✅ Confirmation checkbox: "I understand my API key will be deleted when I close this window"
+- ✅ Form validation: Requires agreed checkbox + apiKey before submit
+- ✅ Error handling: Displays message if session creation fails
+- ✅ useSessionCleanup: Handles beforeunload + 30-min inactivity timeout
+- ✅ TypeScript: Full type safety across components
+- ✅ Styling: Basic CSS (expandable for Tailwind/Material-UI)
+
+**Architecture:**
+- React Context for session state (no Redux needed)
+- sessionStorage for sessionId only (NOT apiKey)
+- axios for API calls to http://localhost:8000
+- REACT_APP_API_URL env var (defaults to localhost:8000)
+
+**Next:** Phase 3 - ChatInterface + ModelSelector + Integration
 
 ---
 
