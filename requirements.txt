@@ -3,6 +3,17 @@ python-dotenv>=1.0.0
 jupyter>=1.0.0
 ipython>=8.0.0
 
+# FastAPI backend
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+aiofiles>=23.0.0
+
+# HTTP client
+requests>=2.31.0
+httpx>=0.25.0
+
 # LLM Provider Support
 # Install only the packages for providers you'll use
 
