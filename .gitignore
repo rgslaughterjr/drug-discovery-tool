@@ -68,3 +68,9 @@ Thumbs.db
 *_private.json
 *_credentials.txt
 secrets/
+
+# Server logs and process files
+*.log
+*.pid
+backend.log
+frontend.log
