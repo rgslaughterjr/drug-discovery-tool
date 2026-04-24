@@ -1,6 +1,6 @@
 """
 API Client for Drug Discovery Pipeline
-Supports multiple LLM providers: Anthropic, AWS Bedrock, OpenAI, Cohere, Ollama, Together, and any OpenAI-compatible API
+Supports multiple LLM providers: Anthropic, AWS Bedrock, OpenAI, Google Gemini, Cohere, Ollama, Together, and any OpenAI-compatible API
 """
 
 import json
@@ -12,7 +12,7 @@ import os
 @dataclass
 class APIConfig:
     """Configuration for API provider (LLM-agnostic)"""
-    provider: str = "anthropic"  # 'anthropic', 'bedrock', 'openai', 'cohere', 'ollama', 'together', or custom endpoint
+    provider: str = "anthropic"  # 'anthropic', 'bedrock', 'openai', 'gemini', 'cohere', 'ollama', 'together', or custom endpoint
     api_key: Optional[str] = None
     model: str = "claude-3-5-sonnet-20241022"  # Model ID (provider-specific)
     base_url: Optional[str] = None  # For OpenAI-compatible APIs and custom endpoints
@@ -33,6 +33,7 @@ class DrugDiscoveryClient:
     - Anthropic Direct API
     - AWS Bedrock
     - OpenAI (including Azure OpenAI with custom base_url)
+    - Google Gemini
     - Cohere
     - Ollama (local LLMs)
     - Together.ai
@@ -47,10 +48,11 @@ class DrugDiscoveryClient:
 
         Environment variables:
         - DISCOVERY_PROVIDER: Provider name (default: 'anthropic')
-          Supported: 'anthropic', 'bedrock', 'openai', 'cohere', 'ollama', 'together'
+          Supported: 'anthropic', 'bedrock', 'openai', 'gemini', 'cohere', 'ollama', 'together'
         - DISCOVERY_API_KEY or provider-specific key: API credential
           - ANTHROPIC_API_KEY for Anthropic
           - OPENAI_API_KEY for OpenAI
+          - GOOGLE_API_KEY for Google Gemini
           - COHERE_API_KEY for Cohere
           - TOGETHER_API_KEY for Together.ai
           - Ollama: not required (local)
@@ -67,6 +69,7 @@ class DrugDiscoveryClient:
                 os.getenv("DISCOVERY_API_KEY") or
                 os.getenv("ANTHROPIC_API_KEY") or
                 os.getenv("OPENAI_API_KEY") or
+                os.getenv("GOOGLE_API_KEY") or
                 os.getenv("COHERE_API_KEY") or
                 os.getenv("TOGETHER_API_KEY")
             )
@@ -92,6 +95,8 @@ class DrugDiscoveryClient:
             self._init_bedrock()
         elif provider == "openai":
             self._init_openai()
+        elif provider == "gemini":
+            self._init_gemini()
         elif provider == "cohere":
             self._init_cohere()
         elif provider == "ollama":
@@ -180,6 +185,18 @@ class DrugDiscoveryClient:
         )
         self.model_id = self.config.model or "meta-llama/Llama-2-7b-chat-hf"
         self.provider_type = "together"
+
+    def _init_gemini(self):
+        """Initialize Google Gemini API client"""
+        import google.generativeai as genai
+        if not self.config.api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY not set. "
+                "Provide via: APIConfig(api_key='...') or export GOOGLE_API_KEY='...'"
+            )
+        genai.configure(api_key=self.config.api_key)
+        self.model_id = self.config.model or "gemini-2.0-flash"
+        self.provider_type = "gemini"
 
     def _init_openai_compatible(self):
         """Initialize generic OpenAI-compatible API client"""
@@ -394,12 +411,14 @@ Format output for direct use in lab notebook entry.
     def _call_api(self, system_prompt: str, user_message: str) -> str:
         """
         Call the underlying API (provider-agnostic router).
-        Supports: Anthropic, Bedrock, OpenAI, Cohere, Ollama, Together, and OpenAI-compatible APIs
+        Supports: Anthropic, Bedrock, OpenAI, Google Gemini, Cohere, Ollama, Together, and OpenAI-compatible APIs
         """
         if self.config.provider == "anthropic":
             return self._call_anthropic(system_prompt, user_message)
         elif self.config.provider == "bedrock":
             return self._call_bedrock(system_prompt, user_message)
+        elif self.config.provider == "gemini":
+            return self._call_gemini(system_prompt, user_message)
         elif self.config.provider == "cohere":
             return self._call_cohere(system_prompt, user_message)
         else:
@@ -451,6 +470,16 @@ Format output for direct use in lab notebook entry.
             max_tokens=2000,
         )
         return response.generations[0].text
+
+    def _call_gemini(self, system_prompt: str, user_message: str) -> str:
+        """Call Google Gemini API"""
+        import google.generativeai as genai
+        model = genai.GenerativeModel(
+            model_name=self.model_id,
+            system_instruction=system_prompt
+        )
+        response = model.generate_content(user_message)
+        return response.text
 
     def _load_prompt(self, task_name: str) -> str:
         """Load system prompt for a task"""
