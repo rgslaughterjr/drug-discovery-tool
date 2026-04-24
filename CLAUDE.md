@@ -33,8 +33,36 @@
 
 ---
 
-## Phase 1: Backend Foundation & Integration
-**Status:** ⏳ PENDING APPROVAL
+## Phase 1: Backend Foundation & Integration ✅ COMPLETE
+
+**Status:** Session manager, FastAPI app, routes, and NLP router implemented.
+
+**Deliverables:**
+- `src/session_manager.py` — In-memory session store with 30-min TTL and secure key handling
+- `src/main.py` — FastAPI app with CORS (localhost:3000) and route registration
+- `src/routes/session.py` — Session endpoints (create, validate, delete)
+- `src/routes/models.py` — Model discovery endpoint (Anthropic, OpenAI, Gemini, Cohere, Mistral)
+- `src/routes/workflows.py` — Workflow integration (evaluate, controls, screening, analyze)
+- `src/nlp_router.py` — Keyword-based NLP router (maps user input → workflow)
+- `test_backend.py` — Standalone API tests
+
+**Architecture:**
+- Session storage: In-memory dict (no persistence to disk/database)
+- Security: API key overwritten before deletion, auto-expire after 30 min
+- API routes: X-Session-ID header validates all requests
+- Workflow integration: Routes extract session credentials, pass to DrugDiscoveryClient
+- Model data: Hardcoded list (Anthropic, OpenAI, Google, Cohere, Mistral) with costs/capabilities
+
+**Key Features:**
+- ✅ Create session with provider + api_key + model
+- ✅ Validate session (returns expires_in)
+- ✅ Delete session (secure key overwrite + removal)
+- ✅ Model discovery (6 providers, 20+ models)
+- ✅ All 4 workflow routes (evaluate, controls, screening, analyze)
+- ✅ Error handling (401 on invalid/expired session, 500 on workflow error)
+- ✅ CORS enabled for React frontend (localhost:3000)
+
+**Next:** Phase 2 - Frontend setup (React LoginModal + SessionContext)
 
 ---
 
