@@ -2,18 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "React Frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "cwd": "web",
+      "port": 3000
+    },
+    {
       "name": "FastAPI Backend",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "uvicorn", "src.main:app", "--reload", "--port", "8000"],
       "port": 8000
-    },
-    {
-      "name": "React Frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["start"],
-      "port": 3000,
-      "cwd": "web"
     }
-  ],
-  "autoVerify": false
+  ]
 }
