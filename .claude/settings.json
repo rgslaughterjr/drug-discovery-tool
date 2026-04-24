@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "session-start": [
+      {
+        "name": "Start FastAPI Backend",
+        "command": "uvicorn src.main:app --reload --port 8000",
+        "shell": "bash",
+        "runInBackground": true,
+        "description": "Start the FastAPI backend on port 8000"
+      },
+      {
+        "name": "Start React Dev Server",
+        "command": "cd web && npm install && npm start",
+        "shell": "bash",
+        "runInBackground": true,
+        "description": "Install dependencies and start React dev server on port 3000"
+      }
+    ]
+  },
+  "permissions": {
+    "bash": {
+      "allow": [
+        "uvicorn",
+        "npm",
+        "git",
+        "find",
+        "grep"
+      ]
+    }
+  }
+}

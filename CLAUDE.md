@@ -138,8 +138,49 @@
 
 ---
 
-## Phase 4: Testing & Security
-**Status:** 📋 PENDING PHASE 3 ✅
+## Phase 4: Testing, Security & Claude Code Preview ✅ COMPLETE
+
+**Status:** Test guide created, Claude Code hooks configured, security checklist provided.
+
+**Deliverables:**
+- `.claude/settings.json` — Session-start hooks (auto-launch backend + frontend)
+- `TESTING.md` — Comprehensive test guide (8 scenarios, security checklist, multi-provider matrix)
+- Updated `CLAUDE.md` — Progress ledger with all phases documented
+
+**Key Features:**
+- ✅ Claude Code session-start hooks (auto-run both servers)
+- ✅ 8 detailed test scenarios (login, chat, cleanup, timeout, errors, custom model, etc.)
+- ✅ Security validation checklist (API key storage, network, session cleanup)
+- ✅ Multi-provider test matrix (Anthropic, OpenAI, Gemini, Cohere)
+- ✅ Performance baseline expectations
+- ✅ Known issues + workarounds
+- ✅ Success criteria for Phase 4 + 5
+- ✅ Template for reporting results
+
+**Test Coverage:**
+- Scenario 1: Anthropic provider (evaluate target)
+- Scenario 2: OpenAI provider (get controls)
+- Scenario 3: Google Gemini provider (prep screening)
+- Scenario 4: Custom model entry (edge case)
+- Scenario 5: beforeunload cleanup (tab close)
+- Scenario 6: Inactivity timeout (30 min auto-logout)
+- Scenario 7: End Session button (manual logout + confirmation)
+- Scenario 8: 401 handling (invalid/expired session)
+
+**Security Checklist:**
+- API key storage (localStorage, sessionStorage, window object)
+- Network traffic (headers, request body, response format)
+- Session cleanup (beforeunload, inactivity, end button)
+- Error handling (no key exposure in messages)
+
+**Claude Code Setup:**
+- Auto-launch FastAPI: `uvicorn src.main:app --reload --port 8000`
+- Auto-launch React: `cd web && npm install && npm start`
+- Both run in background
+- Preview pane: http://localhost:3000
+- Hot reload: Edit React → auto-refresh in preview
+
+**Next:** Phase 5 - Deployment & Final Documentation (Final Phase)
 
 ---
 
