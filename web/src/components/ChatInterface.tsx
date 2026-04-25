@@ -8,6 +8,19 @@ interface Message {
   timestamp: Date;
 }
 
+interface Workflow {
+  type: 'evaluate' | 'controls' | 'screening' | 'hits';
+  organism?: string;
+  protein?: string;
+  proteinId?: string;
+  pdbId?: string;
+  mechanism?: string;
+  dockingSoftware?: string;
+  numCompounds?: number;
+  dockingScores?: string;
+  controls?: string;
+}
+
 interface ChatInterfaceProps {
   sessionId: string;
 }
@@ -45,63 +58,70 @@ export function ChatInterface({ sessionId }: ChatInterfaceProps) {
     setError('');
 
     try {
-      // Parse user input and call appropriate workflow
-      const workflow = parseUserInput(input);
+      // Parse user input and call appropriate workflow(s)
+      const workflows = parseUserInput(input);
 
-      if (!workflow) {
+      if (!workflows || workflows.length === 0) {
         throw new Error(
           'Could not understand. Try: "Evaluate [organism] [protein]", "Generate controls for [protein] PDB [id]", etc.'
         );
       }
 
-      let result;
-      switch (workflow.type) {
-        case 'evaluate':
-          result = await apiClient.evaluateTarget(
-            workflow.organism!,
-            workflow.protein!,
-            workflow.proteinId
-          );
-          break;
-        case 'controls':
-          result = await apiClient.getControls(
-            workflow.organism!,
-            workflow.protein!,
-            workflow.pdbId!
-          );
-          break;
-        case 'screening':
-          result = await apiClient.prepScreening(
-            workflow.organism!,
-            workflow.protein!,
-            workflow.pdbId!,
-            workflow.mechanism!,
-            workflow.dockingSoftware
-          );
-          break;
-        case 'hits':
-          result = await apiClient.analyzeHits(
-            workflow.protein!,
-            workflow.numCompounds!,
-            workflow.dockingScores!,
-            workflow.controls
-          );
-          break;
-        default:
-          throw new Error('Unknown workflow');
+      // Execute all workflows sequentially
+      const results: string[] = [];
+      for (const workflow of workflows) {
+        let result;
+        switch (workflow.type) {
+          case 'evaluate':
+            result = await apiClient.evaluateTarget(
+              workflow.organism!,
+              workflow.protein!,
+              workflow.proteinId
+            );
+            break;
+          case 'controls':
+            result = await apiClient.getControls(
+              workflow.organism!,
+              workflow.protein!,
+              workflow.pdbId!
+            );
+            break;
+          case 'screening':
+            result = await apiClient.prepScreening(
+              workflow.organism!,
+              workflow.protein!,
+              workflow.pdbId!,
+              workflow.mechanism!,
+              workflow.dockingSoftware
+            );
+            break;
+          case 'hits':
+            result = await apiClient.analyzeHits(
+              workflow.protein!,
+              workflow.numCompounds!,
+              workflow.dockingScores!,
+              workflow.controls
+            );
+            break;
+          default:
+            throw new Error('Unknown workflow');
+        }
+        results.push(result.response || 'Workflow completed.');
       }
 
       const assistantMessage: Message = {
         role: 'assistant',
-        content: result.response || 'Workflow completed.',
+        content: results.join('\n\n---\n\n') || 'Workflows completed.',
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err: any) {
-      setError(
-        err.response?.data?.detail || err.message || 'An error occurred'
-      );
+      const errorMessage =
+        (typeof err.response?.data?.detail === 'string' ? err.response.data.detail : null) ||
+        (typeof err.message === 'string' ? err.message : null) ||
+        (typeof err === 'string' ? err : 'An error occurred');
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -175,9 +195,37 @@ export function ChatInterface({ sessionId }: ChatInterfaceProps) {
   );
 }
 
-// Simple NLP parser (server-side router is authoritative)
-function parseUserInput(input: string): any {
+// Extract target organism and protein from user input
+function extractTarget(input: string): { organism: string; protein: string } | null {
+  const organisms = [
+    { match: 'staphylococcus aureus', name: 'Staphylococcus aureus' },
+    { match: 's. aureus', name: 'Staphylococcus aureus' },
+    { match: 'plasmodium falciparum', name: 'Plasmodium falciparum' },
+    { match: 'p. falciparum', name: 'Plasmodium falciparum' },
+  ];
+
   const lower = input.toLowerCase();
+
+  for (const organism of organisms) {
+    const index = lower.indexOf(organism.match);
+    if (index === -1) continue;
+
+    const protein = input
+      .slice(index + organism.match.length)
+      .replace(/^[\s,;:.-]+/, '')
+      .replace(/\s+(?:with|using|pdb|mechanism)\b.*$/i, '')
+      .trim();
+
+    if (protein) return { organism: organism.name, protein };
+  }
+
+  return null;
+}
+
+// Enhanced NLP parser - detects multiple workflows in single prompt
+function parseUserInput(input: string): Workflow[] | null {
+  const lower = input.toLowerCase();
+  const workflows: Workflow[] = [];
 
   // Evaluate target
   if (
@@ -185,30 +233,18 @@ function parseUserInput(input: string): any {
     lower.includes('assess') ||
     lower.includes('target')
   ) {
-    const organisms = [
-      'staphylococcus aureus',
-      's. aureus',
-      'plasmodium falciparum',
-      'p. falciparum',
-    ];
-    let organism = '';
-    for (const o of organisms) {
-      if (lower.includes(o)) {
-        organism = o;
-        break;
-      }
-    }
-
+    const target = extractTarget(input);
     const proteinMatch = input.match(/(?:protein|protein name|target)[\s:]*([^,\n]+)/i);
     const proteinId = input.match(/\b([A-Z]{2,})\b/)?.[1];
+    const protein = proteinMatch?.[1].trim() || target?.protein;
 
-    if (organism && proteinMatch) {
-      return {
+    if (target?.organism && protein) {
+      workflows.push({
         type: 'evaluate',
-        organism: organism === 's. aureus' ? 'Staphylococcus aureus' : organism,
-        protein: proteinMatch[1].trim(),
+        organism: target.organism,
+        protein,
         proteinId,
-      };
+      });
     }
   }
 
@@ -218,37 +254,37 @@ function parseUserInput(input: string): any {
     lower.includes('validation') ||
     lower.includes('decoy')
   ) {
+    const target = extractTarget(input);
     const pdbMatch = input.match(/pdb[\s:]?([0-9A-Z]+)/i);
-    const proteinMatch = input.match(
-      /for\s+([^,\n]+?)(?:\s+pdb|\s*$)/i
-    );
+    const proteinMatch = input.match(/for\s+([^\s,]+)/i);
 
     if (pdbMatch && proteinMatch) {
-      return {
+      const organism = target?.organism || 'Plasmodium falciparum';
+      workflows.push({
         type: 'controls',
+        organism,
         protein: proteinMatch[1].trim(),
         pdbId: pdbMatch[1].toUpperCase(),
-      };
+      });
     }
   }
 
   // Prep screening
   if (lower.includes('screening') || lower.includes('pharmacophore')) {
+    const target = extractTarget(input);
     const pdbMatch = input.match(/pdb[\s:]?([0-9A-Z]+)/i);
-    const proteinMatch = input.match(
-      /for\s+([^,\n]+?)(?:\s+pdb|\s*$)/i
-    );
-    const mechanismMatch = input.match(
-      /mechanism[\s:]*([^,\n]+)/i
-    );
+    const mechanismMatch = input.match(/mechanism[\s:]*([^\s,\n]+)/i);
 
-    if (pdbMatch && proteinMatch && mechanismMatch) {
-      return {
+    if (pdbMatch && mechanismMatch) {
+      const organism = target?.organism || 'Plasmodium falciparum';
+      const protein = target?.protein || 'DHFR';
+      workflows.push({
         type: 'screening',
-        protein: proteinMatch[1].trim(),
+        organism,
+        protein,
         pdbId: pdbMatch[1].toUpperCase(),
         mechanism: mechanismMatch[1].trim(),
-      };
+      });
     }
   }
 
@@ -259,18 +295,18 @@ function parseUserInput(input: string): any {
     lower.includes('prioritize')
   ) {
     const numMatch = input.match(/(\d+,?\d*)\s*compounds?/i);
-    const proteinMatch = input.match(/(?:for|analyzing)\s+([^\n,]+)/i);
+    const proteinMatch = input.match(/(?:for|analyzing)\s+([^\s,]+)/i);
     const scoreMatch = input.match(/mean[\s:]*([^\n,]+)/i);
 
     if (numMatch && proteinMatch) {
-      return {
+      workflows.push({
         type: 'hits',
         protein: proteinMatch[1].trim(),
         numCompounds: parseInt(numMatch[1].replace(',', '')),
         dockingScores: scoreMatch ? scoreMatch[1].trim() : 'Mean: -8.2, SD: 1.1',
-      };
+      });
     }
   }
 
-  return null;
+  return workflows.length > 0 ? workflows : null;
 }

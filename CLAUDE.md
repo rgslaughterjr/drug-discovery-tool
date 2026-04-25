@@ -259,3 +259,74 @@
 ### Token Budget Status
 - **Phase 0 used:** ~1,800 tokens (under 3,500 budget) ✅
 - **Remaining for remaining phases:** ~16,700 tokens
+
+---
+
+## Claude Code Preview Setup ⚡ QUICK REFERENCE
+
+**Never waste time debugging Preview again. Follow this checklist:**
+
+### 1. Verify `.claude/launch.json` Configuration
+```json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "FastAPI Backend",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["src.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "React Frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "port": 3000
+    }
+  ]
+}
+```
+**Key points:**
+- Backend must be `uvicorn` with `--reload` for hot-reload
+- Frontend must be `npm run start` (NOT `react-scripts start`)
+- Port 8000 (backend) and 3000 (frontend) are hardcoded in the app
+
+### 2. Install Dependencies (First Time Only)
+```bash
+# Frontend dependencies (handles peer dependency conflicts)
+cd web && npm install --legacy-peer-deps
+
+# Backend dependencies
+pip install -r requirements.txt
+```
+
+### 3. Start Both Servers
+- Use `preview_start` with EXACT server names from launch.json:
+  - `preview_start("FastAPI Backend")`
+  - `preview_start("React Frontend")`
+- **DO NOT** use Bash to start servers (breaks Preview integration)
+
+### 4. Troubleshooting
+| Issue | Fix |
+|-------|-----|
+| **Port already in use** | Kill with `lsof -i :3000` + `kill -9 PID` |
+| **React deps error** | Run `npm install --legacy-peer-deps` in `web/` |
+| **404 on API calls** | Verify backend running on `http://localhost:8000/health` |
+| **Blank page** | Wait 10s for React build, then reload preview |
+| **Hot reload fails** | Manually reload preview (`window.location.reload()`) |
+
+### 5. API Configuration
+- Frontend auto-detects backend: `http://localhost:8000`
+- CORS enabled for `localhost:3000` in FastAPI
+- Session API key stored in memory only (never disk)
+
+### 6. Test the Full Stack
+```
+1. Login: Provide valid API key (e.g., Anthropic sk-ant-...)
+2. Send: "Evaluate Staphylococcus aureus GyrB"
+3. Expect: LLM response in chat (should arrive within 2 min)
+```
+
+**If anything fails, check logs:**
+- Backend: `preview_logs("FastAPI Backend", level="error")`
+- Frontend: `preview_console_logs("serverId", level="error")`

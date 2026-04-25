@@ -5,7 +5,23 @@
       "Bash(npx -y @modelcontextprotocol/server-filesystem --help)",
       "Bash(npm list:*)",
       "Bash(npm install:*)",
-      "Bash(where mcp-server-filesystem:*)"
+      "Bash(where mcp-server-filesystem:*)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__filesystem__list_directory",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs kill *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 17500 /F)",
+      "PowerShell(Stop-Process -Id 17500 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(\"Process killed\")",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(xargs grep *)",
+      "Bash(curl -X POST http://localhost:8000/session/create -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -X POST http://localhost:8000/session/create -H 'Content-Type: application/json' -d '{\"provider\":\"anthropic\",\"api_key\":\"sk-ant-test-invalid\",\"model\":\"claude-sonnet-4-6\"}')",
+      "Bash(curl -X POST http://localhost:8000/api/workflow/evaluate-target -H 'Content-Type: application/json' -H 'X-Session-ID: fda3469b-0068-4906-b4f6-a56a554d1498' -d '{\"organism\":\"Staphylococcus aureus\",\"protein_name\":\"GyrB\"}')",
+      "Bash(npm --prefix web list react)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

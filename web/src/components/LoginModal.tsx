@@ -16,7 +16,7 @@ const PROVIDERS = [
 ];
 
 const DEFAULT_MODELS: Record<string, string> = {
-  anthropic: 'claude-3-5-sonnet-20241022',
+  anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-4o',
   google: 'gemini-2.0-flash',
   cohere: 'command-r-plus',
@@ -122,7 +122,7 @@ export function LoginModal({ onLoginSuccess }: LoginModalProps) {
               type="text"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g., claude-3-5-sonnet-20241022"
+              placeholder="e.g., claude-sonnet-4-6"
               className="form-input"
             />
             <small>Leave blank for default. Editable to use custom or experimental models.</small>
