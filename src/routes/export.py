@@ -54,7 +54,7 @@ async def export_compounds_csv(
     writer.writeheader()
     writer.writerows(compounds)
 
-    protein = session.get("target_protein", "unknown").replace(" ", "_")
+    protein = (session.get("target_protein") or "unknown").replace(" ", "_")
     filename = f"{protein}_compounds.csv"
 
     return StreamingResponse(
@@ -81,7 +81,18 @@ async def export_results_json(
         results = get_workflow_results(conn, rs_id)
         compounds = get_verified_compounds(conn, rs_id)
 
-    # Parse stored JSON columns
+    def _serialize(obj):
+        """Recursively convert non-JSON-serializable types (datetime → str)."""
+        from datetime import datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: _serialize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_serialize(v) for v in obj]
+        return obj
+
+    # Parse stored JSON columns and strip audit log
     for r in results:
         try:
             r["result"] = json.loads(r.pop("result_json", "{}"))
@@ -91,7 +102,7 @@ async def export_results_json(
 
     export = {
         "research_session": {k: str(v) for k, v in session.items()},
-        "workflow_results": results,
-        "verified_compounds": compounds,
+        "workflow_results": _serialize(results),
+        "verified_compounds": _serialize(compounds),
     }
     return JSONResponse(content=export)
