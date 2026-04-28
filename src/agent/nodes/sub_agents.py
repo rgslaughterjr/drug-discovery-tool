@@ -12,6 +12,7 @@ LangSmith traces each sub-agent run as a named node within the parent graph run.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
+from src.agent import context as _ctx
 from src.agent.nodes.tools import (
     CONTROLS_GENERATOR_TOOLS,
     HITS_ANALYZER_TOOLS,
@@ -28,7 +30,7 @@ from src.agent.nodes.tools import (
 from src.agent.state import ResearchState
 
 _NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-_MAX_ITER = 10
+_MAX_ITER = 5
 
 
 def _load_prompt(name: str) -> str:
@@ -56,13 +58,27 @@ def _extract_task(state: ResearchState) -> tuple[str, dict, str | None]:
     return ("Complete the assigned drug discovery task.", {}, None)
 
 
+async def _invoke_tool(tool_fn, args: dict) -> dict:
+    """Invoke a single tool asynchronously, returning a JSON-serialisable result."""
+    try:
+        raw = await tool_fn.ainvoke(args)
+        return raw if isinstance(raw, dict) else {"result": raw}
+    except Exception as e:
+        return {"error": str(e), "tool": tool_fn.name}
+
+
 async def _run_sub_agent(
     agent_name: str,
     tools: list,
     state: ResearchState,
-) -> dict:
+) -> tuple[dict, str | None]:
     """Core Nemotron tool-calling loop — shared by all four sub-agent nodes."""
-    nvidia_api_key = state.get("_nvidia_api_key") or os.getenv("NVIDIA_API_KEY")
+    nvidia_api_key = _ctx.nvidia_key.get() or os.getenv("NVIDIA_API_KEY")
+    if not nvidia_api_key:
+        raise ValueError(
+            "NVIDIA_API_KEY is required for Nemotron sub-agents. "
+            "Set it in your environment or pass it at login."
+        )
     model_name = os.getenv("SUB_AGENT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
 
     task_description, context, tool_call_id = _extract_task(state)
@@ -71,7 +87,7 @@ async def _run_sub_agent(
     llm = ChatOpenAI(
         model=model_name,
         base_url=_NIM_BASE_URL,
-        api_key=nvidia_api_key or "no-key",
+        api_key=nvidia_api_key,
         temperature=0,
         max_tokens=4096,
     ).bind_tools(tools)
@@ -82,7 +98,7 @@ async def _run_sub_agent(
         "Complete the task using your tools. Return your final answer as a JSON object."
     )
 
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage as LCToolMessage
     messages: list = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_content),
@@ -95,7 +111,7 @@ async def _run_sub_agent(
         messages.append(response)
 
         if not (hasattr(response, "tool_calls") and response.tool_calls):
-            # Final answer
+            # Final answer — extract JSON from response text
             text = response.content or ""
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -108,19 +124,20 @@ async def _run_sub_agent(
             result = {"agent": agent_name, "raw_response": text}
             break
 
-        # Execute tool calls
-        for tc in response.tool_calls:
-            tool_fn = next((t for t in tools if t.name == tc["name"]), None)
-            if tool_fn is None:
-                tool_result = {"error": f"Unknown tool: {tc['name']}"}
-            else:
-                try:
-                    raw = tool_fn.invoke(tc["args"])
-                    tool_result = raw if isinstance(raw, dict) else {"result": raw}
-                except Exception as e:
-                    tool_result = {"error": str(e), "tool": tc["name"]}
+        # Execute all tool calls in parallel
+        tool_map = {t.name: t for t in tools}
+        calls = response.tool_calls
 
-            from langchain_core.messages import ToolMessage as LCToolMessage
+        tool_results = await asyncio.gather(
+            *[
+                _invoke_tool(tool_map[tc["name"]], tc["args"])
+                if tc["name"] in tool_map
+                else asyncio.coroutine(lambda: {"error": f"Unknown tool: {tc['name']}"})()
+                for tc in calls
+            ]
+        )
+
+        for tc, tool_result in zip(calls, tool_results):
             messages.append(
                 LCToolMessage(
                     content=json.dumps(tool_result),

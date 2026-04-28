@@ -31,3 +31,7 @@ class ResearchState(TypedDict):
 
     # Raw structured output from the last sub-agent run — consumed by synthesizer.
     sub_agent_output: Optional[dict]
+
+    # Counts how many times the orchestrator has been invoked in this turn.
+    # Route hard-caps at 6 to prevent infinite tool-call loops.
+    orchestrator_turns: int

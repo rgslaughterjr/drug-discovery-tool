@@ -24,6 +24,7 @@ def _base_state(**overrides) -> dict:
         "pipeline_stage": "idle",
         "delegate_to": None,
         "sub_agent_output": None,
+        "orchestrator_turns": 0,
     }
     base.update(overrides)
     return base
@@ -113,6 +114,19 @@ class TestRouteAfterOrchestrator:
         result = route_after_orchestrator(state)
         assert result == "end"
 
+    def test_turn_cap_routes_to_end(self):
+        """Orchestrator hard-cap at 6 turns prevents runaway loops."""
+        msg = _ai_message_with_tool_call("uniprot_search", {"query": "GyrB"})
+        state = _base_state(messages=[msg], orchestrator_turns=6)
+        result = route_after_orchestrator(state)
+        assert result == "end"
+
+    def test_turn_cap_not_triggered_below_limit(self):
+        msg = _ai_message_with_tool_call("uniprot_search", {"query": "GyrB"})
+        state = _base_state(messages=[msg], orchestrator_turns=5)
+        result = route_after_orchestrator(state)
+        assert result == "tools"
+
 
 # ---------------------------------------------------------------------------
 # ResearchState structure
@@ -124,6 +138,7 @@ class TestResearchState:
         assert state["pipeline_stage"] == "idle"
         assert state["delegate_to"] is None
         assert state["sub_agent_output"] is None
+        assert state["orchestrator_turns"] == 0
 
     def test_state_messages_accepts_langchain_messages(self):
         msgs = [

@@ -16,6 +16,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import ToolNode
 
+from src.agent import context as _ctx
 from src.agent.nodes.tools import ALL_TOOLS
 from src.agent.state import ResearchState
 
@@ -41,6 +42,10 @@ Do not repeat information the user already provided.
 # Delegation tool schema — a synthetic tool that routes to a sub-agent node
 from langchain_core.tools import tool
 from typing import Optional
+
+_MAX_ORCHESTRATOR_TURNS = 6
+# Keep only the most recent N messages in context (trims old tool exchanges)
+_MESSAGE_WINDOW = 20
 
 
 @tool
@@ -81,15 +86,19 @@ def _build_llm(api_key: str, model: str) -> ChatAnthropic:
     ).bind_tools(ORCHESTRATOR_TOOLS)
 
 
-def orchestrator_node(state: ResearchState) -> dict:
+async def orchestrator_node(state: ResearchState) -> dict:
     """Invoke Sonnet with the full conversation; return state update."""
-    api_key = state.get("_anthropic_api_key") or os.environ["ANTHROPIC_API_KEY"]
+    api_key = _ctx.anthropic_key.get() or os.environ.get("ANTHROPIC_API_KEY", "")
     model = state.get("model") or os.getenv("ORCHESTRATOR_MODEL", "claude-sonnet-4-6")
 
     llm = _build_llm(api_key, model)
 
-    messages = [SystemMessage(content=_ORCHESTRATOR_SYSTEM)] + list(state["messages"])
-    response = llm.invoke(messages)
+    # Trim conversation to the most recent N messages to bound context growth
+    all_messages = list(state["messages"])
+    windowed = all_messages[-_MESSAGE_WINDOW:] if len(all_messages) > _MESSAGE_WINDOW else all_messages
+
+    messages = [SystemMessage(content=_ORCHESTRATOR_SYSTEM)] + windowed
+    response = await llm.ainvoke(messages)
 
     # Check if this is a delegation call — extract the target sub-agent name
     delegate_to = None
@@ -99,14 +108,20 @@ def orchestrator_node(state: ResearchState) -> dict:
                 delegate_to = tc["args"].get("agent_name")
                 break
 
+    current_turns = state.get("orchestrator_turns", 0)
     return {
         "messages": [response],
         "delegate_to": delegate_to,
+        "orchestrator_turns": current_turns + 1,
     }
 
 
 def route_after_orchestrator(state: ResearchState) -> str:
     """Conditional edge: decide where to go after the orchestrator responds."""
+    # Hard cap — prevent runaway tool-call loops
+    if state.get("orchestrator_turns", 0) >= _MAX_ORCHESTRATOR_TURNS:
+        return "end"
+
     messages = list(state.get("messages") or [])
     if not messages:
         return "end"

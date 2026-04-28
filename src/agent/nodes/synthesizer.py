@@ -13,6 +13,7 @@ import os
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.agent import context as _ctx
 from src.agent.state import ResearchState
 
 _SYNTHESIZER_SYSTEM = """\
@@ -30,9 +31,9 @@ Rules:
 """
 
 
-def synthesizer_node(state: ResearchState) -> dict:
+async def synthesizer_node(state: ResearchState) -> dict:
     """Format sub_agent_output into user-friendly prose using Claude Haiku."""
-    api_key = state.get("_anthropic_api_key") or os.environ["ANTHROPIC_API_KEY"]
+    api_key = _ctx.anthropic_key.get() or os.environ.get("ANTHROPIC_API_KEY", "")
     model = os.getenv("HAIKU_MODEL", "claude-haiku-4-5-20251001")
 
     sub_agent_output = state.get("sub_agent_output") or {}
@@ -40,7 +41,7 @@ def synthesizer_node(state: ResearchState) -> dict:
     llm = ChatAnthropic(
         model=model,
         api_key=api_key,
-        max_tokens=1024,
+        max_tokens=512,
         temperature=0,
     )
 
@@ -49,7 +50,7 @@ def synthesizer_node(state: ResearchState) -> dict:
         "Present this to the researcher clearly and concisely."
     )
 
-    response = llm.invoke([
+    response = await llm.ainvoke([
         SystemMessage(content=_SYNTHESIZER_SYSTEM),
         HumanMessage(content=prompt),
     ])

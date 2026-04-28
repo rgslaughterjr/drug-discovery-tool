@@ -9,6 +9,7 @@ Agentic endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Optional
 
@@ -28,6 +29,22 @@ from src.database.session_db import (
 from src.session_manager import _store as session_store
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+# ---------------------------------------------------------------------------
+# Singleton compiled graph — compiled once with the async checkpointer.
+# ---------------------------------------------------------------------------
+
+_compiled_graph = None
+
+
+async def _get_compiled_graph():
+    global _compiled_graph
+    if _compiled_graph is None:
+        from src.agent.graph import build_graph
+        from src.agent.checkpointer import get_async_checkpointer
+        checkpointer = await get_async_checkpointer()
+        _compiled_graph = build_graph(checkpointer=checkpointer)
+    return _compiled_graph
 
 
 # ---------------------------------------------------------------------------
@@ -98,39 +115,43 @@ async def agent_chat_sse(
 
     async def event_generator():
         from langchain_core.messages import HumanMessage
-        from src.agent.graph import build_graph
+        from src.agent import context as _ctx
         from src.agent.streaming import error_event, langgraph_events_to_sse
 
+        # Set per-request context vars — keys are never written to LangGraph state
+        # or checkpointed to SQLite, and are invisible to LangSmith.
+        _ctx.anthropic_key.set(anthropic_api_key)
+        _ctx.nvidia_key.set(nvidia_api_key)
+
         try:
-            checkpointer = await _get_checkpointer()
-            graph = build_graph(checkpointer=checkpointer)
+            async with asyncio.timeout(90):
+                graph = await _get_compiled_graph()
 
-            # Initial state for this turn
-            initial_state = {
-                "messages": [HumanMessage(content=request_body.message)],
-                "research_session_id": research_session_id,
-                "auth_session_id": x_session_id,
-                "provider": provider,
-                "model": session_store.get_model(x_session_id),
-                "pipeline_stage": "idle",
-                "delegate_to": None,
-                "sub_agent_output": None,
-                # Pass API keys via state so nodes don't need global env vars
-                "_anthropic_api_key": anthropic_api_key,
-                "_nvidia_api_key": nvidia_api_key,
-            }
+                initial_state = {
+                    "messages": [HumanMessage(content=request_body.message)],
+                    "research_session_id": research_session_id,
+                    "auth_session_id": x_session_id,
+                    "provider": provider,
+                    "model": session_store.get_model(x_session_id),
+                    "pipeline_stage": "idle",
+                    "delegate_to": None,
+                    "sub_agent_output": None,
+                    "orchestrator_turns": 0,
+                }
 
-            config = {"configurable": {"thread_id": research_session_id}}
+                config = {"configurable": {"thread_id": research_session_id}}
 
-            event_stream = graph.astream_events(
-                initial_state,
-                config=config,
-                version="v2",
-            )
+                event_stream = graph.astream_events(
+                    initial_state,
+                    config=config,
+                    version="v2",
+                )
 
-            async for sse_line in langgraph_events_to_sse(event_stream, research_session_id):
-                yield sse_line
+                async for sse_line in langgraph_events_to_sse(event_stream, research_session_id):
+                    yield sse_line
 
+        except TimeoutError:
+            yield error_event("Request timed out after 90 seconds — please try a more specific query.").to_sse_line()
         except Exception as e:
             yield error_event(str(e)).to_sse_line()
 
@@ -145,12 +166,6 @@ async def agent_chat_sse(
             "Connection": "keep-alive",
         },
     )
-
-
-async def _get_checkpointer():
-    """Lazily create the async SQLite checkpointer."""
-    from src.agent.checkpointer import make_async_checkpointer
-    return await make_async_checkpointer()
 
 
 # ---------------------------------------------------------------------------
