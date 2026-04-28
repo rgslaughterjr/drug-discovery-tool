@@ -7,7 +7,7 @@ import { useSessionCleanup } from './hooks/useSessionCleanup';
 import './App.css';
 
 function App() {
-  const { sessionId, clearSession } = useContext(SessionContext);
+  const { sessionId, provider, model, clearSession } = useContext(SessionContext);
 
   useSessionCleanup(sessionId, () => {
     clearSession();
@@ -28,7 +28,11 @@ function App() {
       </div>
 
       <div className="app-container">
-        <ChatInterface sessionId={sessionId} />
+        <ChatInterface
+          sessionId={sessionId}
+          provider={provider || 'anthropic'}
+          model={model || ''}
+        />
       </div>
     </div>
   );

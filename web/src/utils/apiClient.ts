@@ -103,6 +103,35 @@ class ApiClient {
     });
     return response.data;
   }
+
+  // ------ New agentic endpoints ------
+
+  async listResearchSessions() {
+    const response = await this.client.get('/api/agent/research-sessions');
+    return response.data;
+  }
+
+  async createResearchSession(name?: string) {
+    const response = await this.client.post('/api/agent/research-sessions', { name });
+    return response.data;
+  }
+
+  async deleteResearchSession(rsId: string) {
+    const response = await this.client.delete(`/api/agent/research-sessions/${rsId}`);
+    return response.data;
+  }
+
+  async exportCompoundsCsv(rsId: string): Promise<Blob> {
+    const response = await this.client.get(`/api/export/${rsId}/compounds.csv`, {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  }
+
+  async exportResultsJson(rsId: string) {
+    const response = await this.client.get(`/api/export/${rsId}/results.json`);
+    return response.data;
+  }
 }
 
 export const apiClient = new ApiClient();

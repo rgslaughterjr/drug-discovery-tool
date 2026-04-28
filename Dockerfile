@@ -1,9 +1,17 @@
 # Multi-stage build: Python backend + React frontend
 
-# Stage 1: Python backend
+# Stage 1: Python backend (includes RDKit system deps)
 FROM python:3.11-slim as backend-builder
 
 WORKDIR /app
+
+# RDKit-pypi requires these system libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxrender1 \
+    libxext6 \
+    libxinerama1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -21,6 +29,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# RDKit runtime deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxrender1 \
+    libxext6 \
+    libxinerama1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy Python dependencies from builder
 COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
@@ -29,6 +44,9 @@ COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY src/ src/
 COPY prompts/ prompts/
 COPY requirements.txt .
+
+# SQLite data directory
+RUN mkdir -p /app/data
 
 # Copy built React frontend
 COPY --from=frontend-builder /app/build web/build

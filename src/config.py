@@ -3,8 +3,19 @@ Configuration loader for Drug Discovery Pipeline
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional
+
+# Default models for the new agentic system
+ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "claude-sonnet-4-6")
+SUB_AGENT_MODEL = os.getenv(
+    "SUB_AGENT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct"
+)
+HAIKU_MODEL = os.getenv("HAIKU_MODEL", "claude-haiku-4-5-20251001")
+NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+# SQLite database path (relative to project root)
+DB_PATH = os.getenv("DB_PATH", "./data/research.db")
 
 
 @dataclass

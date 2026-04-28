@@ -38,6 +38,13 @@ cohere>=5.0.0
 # Ollama (local LLMs)
 # (uses openai package for compatibility)
 
+# Agentic system — database persistence
+sqlalchemy>=2.0.0
+
+# Cheminformatics (PAINS screening, SMILES validation, Murcko scaffolds)
+# Install with: pip install rdkit-pypi
+rdkit-pypi>=2022.9.5
+
 # Optional: for enhanced Jupyter notebooks
 nbconvert>=7.0.0
 matplotlib>=3.5.0

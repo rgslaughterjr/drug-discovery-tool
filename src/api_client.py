@@ -495,6 +495,95 @@ Format output for direct use in lab notebook entry.
         with open(prompt_path, "r") as f:
             return f.read()
 
+    # ------------------------------------------------------------------
+    # New: Tool-use and streaming methods (Anthropic only)
+    # ------------------------------------------------------------------
+
+    def call_with_tools(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = 4096,
+    ) -> Any:
+        """Single-turn (non-streaming) call with Anthropic tool use.
+
+        Returns the full Anthropic Message object.
+        Raises NotImplementedError for non-Anthropic providers.
+        """
+        if self.config.provider != "anthropic":
+            raise NotImplementedError(
+                f"Tool use requires provider='anthropic'; current provider='{self.config.provider}'. "
+                "Non-Anthropic providers use the legacy /api/workflow/* endpoints."
+            )
+        return self.client.messages.create(
+            model=self.model_id,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            tools=tools,
+            messages=messages,
+        )
+
+    async def stream_with_tools(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = 4096,
+    ):
+        """Async streaming call with Anthropic tool use.
+
+        Yields raw Anthropic stream event objects.
+        The OrchestratorAgent processes these into SSEEvent objects.
+        Raises NotImplementedError for non-Anthropic providers.
+        """
+        if self.config.provider != "anthropic":
+            raise NotImplementedError(
+                f"Streaming tool use requires provider='anthropic'; "
+                f"current provider='{self.config.provider}'."
+            )
+        # Use the async client if available; otherwise wrap sync client
+        try:
+            from anthropic import AsyncAnthropic
+            async_client = AsyncAnthropic(api_key=self.config.api_key)
+            async with async_client.messages.stream(
+                model=self.model_id,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
+            ) as stream:
+                async for event in stream:
+                    yield event
+        except Exception as e:
+            raise RuntimeError(f"Anthropic streaming error: {e}") from e
+
+    def call_openai_with_tools(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = 4096,
+    ) -> Any:
+        """Single-turn tool-use call for OpenAI-compatible providers (e.g. NVIDIA Nemotron).
+
+        tools must be in OpenAI function-calling format (use tool_registry.to_openai_format()).
+        Returns the full OpenAI ChatCompletion object.
+        """
+        if self.provider_type not in ("openai", "openai_compatible", "together", "ollama"):
+            raise NotImplementedError(
+                f"call_openai_with_tools requires an OpenAI-compatible provider; "
+                f"current provider_type='{self.provider_type}'."
+            )
+        openai_messages = [{"role": "system", "content": system_prompt}] + messages
+        return self.client.chat.completions.create(
+            model=self.model_id,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice="auto",
+            messages=openai_messages,
+        )
+
     def _get_generic_prompt(self, task_name: str) -> str:
         """Fallback generic prompts for each task"""
         prompts = {
