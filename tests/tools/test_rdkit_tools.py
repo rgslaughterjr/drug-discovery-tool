@@ -25,7 +25,8 @@ from src.agent.tools.rdkit_tools import (
 
 # Representative SMILES used across tests
 ASPIRIN = "CC(=O)Oc1ccccc1C(=O)O"
-NOVOBIOCIN = "CC1(C)C(O)CC(O1)OC2=CC(=CC3=C2C(=O)C(=CO3)C(=O)N)OC"
+# Erythromycin core: MW=620, HBA=13 — 2 Ro5 violations (MW>500, HBA>10)
+ERYTHROMYCIN = "CC[C@@H]1OC(=O)[C@H](C)[C@@H](O[C@@H]2C[C@@](C)(OC)[C@@H](O)[C@H](C)O2)[C@H](C)[C@@H](O)[C@@](C)(O)CC(=O)O[C@@H]([C@@H](C)CC=O)[C@H]([C@@H]1OC)O"
 INVALID_SMILES = "not_a_smiles!!!"
 ETHANOL = "CCO"
 
@@ -57,9 +58,9 @@ class TestValidateSmiles:
         assert 178 < result["mw"] < 182
         assert result["ro5_violations"] == 0
 
-    def test_novobiocin_ro5_violations(self):
-        # Novobiocin MW ~613, TPSA ~146 — borderline Ro5
-        result = validate_smiles(NOVOBIOCIN)
+    def test_large_drug_ro5_violations(self):
+        # Erythromycin core MW ~620, HBA=13 — expect >=2 Ro5 violations
+        result = validate_smiles(ERYTHROMYCIN)
         assert result["valid"] is True
         assert result["mw"] > 600
         assert result["ro5_violations"] >= 1
@@ -97,8 +98,8 @@ class TestCalculateMolecularProperties:
 # ---------------------------------------------------------------------------
 
 class TestScreenPains:
-    # Rhodamine B — known PAINS scaffold
-    PAINS_COMPOUND = "CCN(CC)c1ccc2c(-c3ccccc3C(=O)[O-])c3ccc(=[N+](CC)CC)cc3oc2c1"
+    # Rhodanine-catechol conjugate — reliable PAINS hit (catechol_A pattern)
+    PAINS_COMPOUND = "O=C1NC(=S)CC1=Cc1ccc(O)c(O)c1"
 
     def test_clean_compound_not_flagged(self):
         result = screen_pains([ASPIRIN])
