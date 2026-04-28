@@ -31,8 +31,9 @@ jobs:
             pytest \
             requests httpx \
             fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
-            sqlalchemy \
-            anthropic openai
+            sqlalchemy aiosqlite \
+            anthropic openai \
+            langgraph langchain-core langchain-anthropic langchain-openai langsmith
 
       # RDKit is optional — tests skip gracefully if not installed
       - name: Install RDKit (optional)
@@ -74,7 +75,8 @@ jobs:
           /tmp/audit-venv/bin/pip install --upgrade pip pip-audit
           /tmp/audit-venv/bin/pip install \
             fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
-            sqlalchemy httpx requests anthropic openai
+            sqlalchemy aiosqlite httpx requests anthropic openai \
+            langgraph langchain-core langchain-anthropic langchain-openai langsmith
 
       - name: Audit project dependencies for known CVEs
         run: /tmp/audit-venv/bin/pip-audit --skip-editable

@@ -40,6 +40,14 @@ cohere>=5.0.0
 
 # Agentic system — database persistence
 sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+
+# LangGraph + LangChain (orchestrator, sub-agents, LangSmith tracing)
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-anthropic>=0.2.0
+langchain-openai>=0.2.0
+langsmith>=0.1.0
 
 # Cheminformatics (PAINS screening, SMILES validation, Murcko scaffolds)
 # Install with: pip install rdkit

@@ -1,178 +1,135 @@
-"""Tests for ConversationHistory load/save/compress logic."""
+"""Tests for LangGraph graph structure and routing logic."""
 
 import pytest
+from unittest.mock import MagicMock
 
-from src.agent.conversation import ConversationHistory
-from src.database.conversation_db import count_turns
-from src.database.session_db import create_research_session
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-AUTH_SID = "auth-conv-history-001"
-
-
-@pytest.fixture()
-def rs_id(db_conn):
-    return create_research_session(db_conn, AUTH_SID, "anthropic", "claude-sonnet-4-6")
+from src.agent.graph import build_graph
+from src.agent.nodes.orchestrator import route_after_orchestrator
+from src.agent.state import ResearchState
 
 
-@pytest.fixture()
-def history(db_conn, rs_id):
-    return ConversationHistory(rs_id, db_conn)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _base_state(**overrides) -> dict:
+    base = {
+        "messages": [],
+        "research_session_id": "rs-test-001",
+        "auth_session_id": "auth-test-001",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "pipeline_stage": "idle",
+        "delegate_to": None,
+        "sub_agent_output": None,
+    }
+    base.update(overrides)
+    return base
 
 
-class TestConversationHistoryLoad:
-    def test_load_empty_session(self, history):
-        messages = history.load()
-        assert messages == []
-
-    def test_messages_property_triggers_load(self, history):
-        assert history.messages == []
-
-    def test_loaded_flag_prevents_double_load(self, db_conn, rs_id):
-        h = ConversationHistory(rs_id, db_conn)
-        h.load()
-        assert h._loaded is True
-        h.load()  # second call should be no-op (covered by _loaded guard)
-        assert h._loaded is True
+def _ai_message_with_tool_call(tool_name: str, args: dict) -> AIMessage:
+    msg = AIMessage(content="")
+    msg.tool_calls = [{"name": tool_name, "args": args, "id": "tc-001"}]
+    return msg
 
 
-class TestConversationHistoryAdd:
-    def test_add_user_turn(self, history, db_conn, rs_id):
-        history.add_user_turn("Evaluate GyrB as a target")
-        assert len(history.messages) == 1
-        assert history.messages[0]["role"] == "user"
-        assert history.messages[0]["content"][0]["text"] == "Evaluate GyrB as a target"
-        assert count_turns(db_conn, rs_id) == 1
+# ---------------------------------------------------------------------------
+# Graph structure tests
+# ---------------------------------------------------------------------------
 
-    def test_add_assistant_turn(self, history, db_conn, rs_id):
-        history.add_user_turn("Question")
-        history.add_assistant_turn([{"type": "text", "text": "Answer"}])
-        assert len(history.messages) == 2
-        assert history.messages[1]["role"] == "assistant"
-        assert count_turns(db_conn, rs_id) == 2
+class TestBuildGraph:
+    def test_graph_compiles_without_checkpointer(self):
+        graph = build_graph()
+        assert graph is not None
 
-    def test_add_tool_result_turn(self, history, db_conn, rs_id):
-        history.add_tool_result_turn([
-            {"type": "tool_result", "tool_use_id": "tu_1", "content": "P0A749"}
-        ])
-        assert history.messages[0]["role"] == "user"
-        assert count_turns(db_conn, rs_id) == 1
-
-    def test_turn_indices_sequential(self, history):
-        history.add_user_turn("Q1")
-        history.add_assistant_turn([{"type": "text", "text": "A1"}])
-        history.add_user_turn("Q2")
-        assert len(history.messages) == 3
+    def test_graph_has_expected_nodes(self):
+        graph = build_graph()
+        node_names = set(graph.nodes.keys())
+        assert "orchestrator" in node_names
+        assert "tools" in node_names
+        assert "target_evaluator" in node_names
+        assert "controls_generator" in node_names
+        assert "screening_designer" in node_names
+        assert "hits_analyzer" in node_names
+        assert "synthesizer" in node_names
 
 
-class TestConversationHistoryCompress:
-    def _setup_tool_exchange(self, history):
-        """Build a realistic 4-message tool exchange."""
-        history.add_user_turn("Evaluate Staphylococcus aureus GyrB as a drug target")
-        history.add_assistant_turn([
-            {"type": "text", "text": "I'll look that up."},
-            {"type": "tool_use", "id": "tu_1", "name": "uniprot_search",
-             "input": {"query": "GyrB Staphylococcus aureus"}},
-        ])
-        history.add_tool_result_turn([
-            {"type": "tool_result", "tool_use_id": "tu_1",
-             "content": [{"type": "text", "text": '{"entries": [{"uniprot_id": "P0A749"}]}'}]},
-        ])
-        history.add_assistant_turn([
-            {"type": "text", "text": "GO. UniProt P0A749; best structure 4P8O."},
-        ])
+# ---------------------------------------------------------------------------
+# Routing tests
+# ---------------------------------------------------------------------------
 
-    def test_compress_removes_tool_use_from_history(self, history, db_conn, rs_id):
-        self._setup_tool_exchange(history)
-        assert len(history.messages) == 4
+class TestRouteAfterOrchestrator:
+    def test_no_tool_calls_routes_to_end(self):
+        state = _base_state(messages=[AIMessage(content="Here is my answer.")])
+        result = route_after_orchestrator(state)
+        assert result == "end"
 
-        history.compress_last_workflow({
-            "workflow_type": "evaluate_target",
-            "organism": "Staphylococcus aureus",
-            "protein": "GyrB",
-            "key_findings": "GO. UniProt P0A749; best structure 4P8O at 1.95 Å.",
-        })
+    def test_regular_tool_call_routes_to_tools(self):
+        msg = _ai_message_with_tool_call("uniprot_search", {"query": "GyrB"})
+        state = _base_state(messages=[msg])
+        result = route_after_orchestrator(state)
+        assert result == "tools"
 
-        # Tool_use turn + following tool_result turn should both be collapsed
-        has_tool_use = any(
-            isinstance(m["content"], list) and
-            any(b.get("type") == "tool_use" for b in m["content"] if isinstance(b, dict))
-            for m in history.messages
+    def test_delegation_routes_to_target_evaluator(self):
+        msg = _ai_message_with_tool_call(
+            "delegate_to_sub_agent",
+            {"agent_name": "target_evaluator", "task_description": "Evaluate GyrB"},
         )
-        assert not has_tool_use
+        state = _base_state(messages=[msg])
+        result = route_after_orchestrator(state)
+        assert result == "target_evaluator"
 
-    def test_compress_inserts_summary_block(self, history):
-        self._setup_tool_exchange(history)
-        history.compress_last_workflow({
-            "workflow_type": "evaluate_target",
-            "organism": "Staphylococcus aureus",
-            "protein": "GyrB",
-            "key_findings": "GO.",
-        })
-        found_summary = any(
-            isinstance(m["content"], list) and
-            any("[WORKFLOW COMPLETE" in b.get("text", "") for b in m["content"] if isinstance(b, dict))
-            for m in history.messages
+    def test_delegation_routes_to_controls_generator(self):
+        msg = _ai_message_with_tool_call(
+            "delegate_to_sub_agent",
+            {"agent_name": "controls_generator", "task_description": "Find inhibitors"},
         )
-        assert found_summary
+        state = _base_state(messages=[msg])
+        result = route_after_orchestrator(state)
+        assert result == "controls_generator"
 
-    def test_compress_persists_to_sqlite(self, history, db_conn, rs_id):
-        self._setup_tool_exchange(history)
-        before = count_turns(db_conn, rs_id)
+    def test_delegation_routes_to_screening_designer(self):
+        msg = _ai_message_with_tool_call(
+            "delegate_to_sub_agent",
+            {"agent_name": "screening_designer", "task_description": "Design pharmacophore"},
+        )
+        state = _base_state(messages=[msg])
+        result = route_after_orchestrator(state)
+        assert result == "screening_designer"
 
-        history.compress_last_workflow({
-            "workflow_type": "evaluate_target",
-            "organism": "S. aureus",
-            "protein": "GyrB",
-            "key_findings": "GO.",
-        })
+    def test_delegation_routes_to_hits_analyzer(self):
+        msg = _ai_message_with_tool_call(
+            "delegate_to_sub_agent",
+            {"agent_name": "hits_analyzer", "task_description": "Rank hits"},
+        )
+        state = _base_state(messages=[msg])
+        result = route_after_orchestrator(state)
+        assert result == "hits_analyzer"
 
-        after = count_turns(db_conn, rs_id)
-        # Compression should produce fewer stored turns
-        assert after < before
-
-    def test_compress_noop_when_no_tool_use(self, history):
-        history.add_user_turn("What does TPSA mean?")
-        history.add_assistant_turn([{"type": "text", "text": "TPSA is..."}])
-        before_len = len(history.messages)
-
-        history.compress_last_workflow({
-            "workflow_type": "evaluate_target",
-            "organism": "",
-            "protein": "",
-            "key_findings": "",
-        })
-
-        # No tool_use → nothing compressed → length unchanged
-        assert len(history.messages) == before_len
+    def test_empty_messages_routes_to_end(self):
+        state = _base_state(messages=[])
+        result = route_after_orchestrator(state)
+        assert result == "end"
 
 
-class TestTokenEstimate:
-    def test_empty_history_zero(self, history):
-        assert history.token_estimate() == 0
+# ---------------------------------------------------------------------------
+# ResearchState structure
+# ---------------------------------------------------------------------------
 
-    def test_increases_with_turns(self, history):
-        history.add_user_turn("Short question")
-        t1 = history.token_estimate()
-        history.add_assistant_turn([{"type": "text", "text": "A longer answer " * 20}])
-        t2 = history.token_estimate()
-        assert t2 > t1
+class TestResearchState:
+    def test_state_accepts_all_required_fields(self):
+        state = _base_state()
+        assert state["pipeline_stage"] == "idle"
+        assert state["delegate_to"] is None
+        assert state["sub_agent_output"] is None
 
-    def test_decreases_after_compression(self, history):
-        history.add_user_turn("Evaluate GyrB")
-        history.add_assistant_turn([
-            {"type": "tool_use", "id": "tu_1", "name": "uniprot_search", "input": {}},
-        ])
-        history.add_tool_result_turn([
-            {"type": "tool_result", "tool_use_id": "tu_1",
-             "content": [{"type": "text", "text": "x" * 500}]},
-        ])
-        t_before = history.token_estimate()
-
-        history.compress_last_workflow({
-            "workflow_type": "evaluate_target",
-            "organism": "S. aureus",
-            "protein": "GyrB",
-            "key_findings": "GO.",
-        })
-        t_after = history.token_estimate()
-        assert t_after < t_before
+    def test_state_messages_accepts_langchain_messages(self):
+        msgs = [
+            HumanMessage(content="Evaluate GyrB"),
+            AIMessage(content="I'll look that up."),
+        ]
+        state = _base_state(messages=msgs)
+        assert len(state["messages"]) == 2
+        assert state["messages"][0].content == "Evaluate GyrB"

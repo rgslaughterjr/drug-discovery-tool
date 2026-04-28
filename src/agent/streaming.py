@@ -1,14 +1,14 @@
 """
-SSEEvent dataclass and StreamingOrchestrator.
+SSEEvent dataclass + LangGraph event translator.
 
-Translates raw Anthropic streaming API events into typed SSE JSON events
+Translates LangGraph astream_events() output into typed SSE JSON events
 that the React frontend can consume.
 
-SSE event types emitted:
-  thinking        — tool call about to be dispatched
-  tool_result     — tool call completed with duration
-  text_delta      — incremental text from the LLM
-  sub_agent_start — sub-agent delegation beginning
+SSE event types:
+  thinking        — graph node started/done
+  tool_call       — tool call lifecycle
+  text_delta      — incremental LLM text
+  sub_agent_start — Nemotron sub-agent delegation beginning
   sub_agent_done  — sub-agent returned a result
   structured_result — compound table or evaluation result
   done            — stream complete
@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -28,11 +28,13 @@ class SSEEvent:
     type: str
     # text streaming
     content: Optional[str] = None
+    # node lifecycle
+    node: Optional[str] = None
     # tool call lifecycle
     tool: Optional[str] = None
     status: Optional[str] = None
     duration_ms: Optional[int] = None
-    data: Optional[dict] = None
+    data: Optional[Any] = None
     # sub-agent
     agent: Optional[str] = None
     # structured result
@@ -50,7 +52,10 @@ class SSEEvent:
         return f"data: {self.to_json()}\n\n"
 
 
+# ---------------------------------------------------------------------------
 # Convenience constructors
+# ---------------------------------------------------------------------------
+
 def thinking_event(tool: str) -> SSEEvent:
     return SSEEvent(type="thinking", tool=tool, status="calling")
 
@@ -155,3 +160,48 @@ def _summarize_tool_result(tool: str, data: dict) -> dict:
         }
     # Default: just return top-level keys, truncated
     return {k: v for k, v in list(data.items())[:4]}
+
+
+# ---------------------------------------------------------------------------
+# LangGraph astream_events() → SSE translation
+# ---------------------------------------------------------------------------
+
+_THINKING_NODES = {
+    "orchestrator",
+    "target_evaluator",
+    "controls_generator",
+    "screening_designer",
+    "hits_analyzer",
+    "synthesizer",
+}
+
+
+async def langgraph_events_to_sse(event_stream, research_session_id: str):
+    """Consume a LangGraph astream_events() stream and yield SSE line strings."""
+    tool_start_times: dict[str, float] = {}
+
+    async for event in event_stream:
+        kind = event.get("event", "")
+        name = event.get("name", "")
+        data = event.get("data", {})
+
+        if kind == "on_chain_start" and name in _THINKING_NODES:
+            yield SSEEvent(type="thinking", node=name, status="started").to_sse_line()
+
+        elif kind == "on_chain_end" and name in _THINKING_NODES:
+            yield SSEEvent(type="thinking", node=name, status="done").to_sse_line()
+
+        elif kind == "on_tool_start":
+            tool_start_times[name] = time.time()
+            yield SSEEvent(type="tool_call", tool=name, status="calling").to_sse_line()
+
+        elif kind == "on_tool_end":
+            elapsed = int((time.time() - tool_start_times.pop(name, time.time())) * 1000)
+            yield SSEEvent(type="tool_call", tool=name, status="done", duration_ms=elapsed).to_sse_line()
+
+        elif kind == "on_chat_model_stream":
+            chunk = data.get("chunk")
+            if chunk and hasattr(chunk, "content") and isinstance(chunk.content, str) and chunk.content:
+                yield text_delta_event(chunk.content).to_sse_line()
+
+    yield done_event(research_session_id).to_sse_line()

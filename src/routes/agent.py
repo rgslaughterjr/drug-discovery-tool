@@ -1,6 +1,6 @@
 """
 Agentic endpoints:
-  POST /api/agent/chat                   — SSE streaming orchestrator
+  POST /api/agent/chat                   — SSE streaming via LangGraph
   POST /api/agent/research-sessions      — create research session
   GET  /api/agent/research-sessions      — list sessions for current auth session
   GET  /api/agent/research-sessions/{id} — get session detail + conversation
@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.engine import Connection, Engine
@@ -31,16 +31,6 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
 # ---------------------------------------------------------------------------
-# DB dependency
-# ---------------------------------------------------------------------------
-
-def get_db(request) -> Connection:  # type: ignore[override]
-    engine: Engine = request.app.state.db_engine
-    with engine.connect() as conn:
-        yield conn
-
-
-# ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
 
@@ -54,7 +44,7 @@ def _require_session(x_session_id: str | None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Request / Response models
+# Request models
 # ---------------------------------------------------------------------------
 
 class AgentChatRequest(BaseModel):
@@ -67,11 +57,8 @@ class CreateResearchSessionRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/agent/chat  — SSE streaming
+# POST /api/agent/chat  — LangGraph SSE streaming
 # ---------------------------------------------------------------------------
-
-from fastapi import Request
-
 
 @router.post("/chat")
 async def agent_chat_sse(
@@ -80,7 +67,6 @@ async def agent_chat_sse(
     x_session_id: Optional[str] = Header(None),
 ):
     auth = _require_session(x_session_id)
-    anthropic_api_key: str = session_store.get_api_key(x_session_id)
     provider: str = session_store.get_provider(x_session_id)
 
     if provider != "anthropic":
@@ -88,14 +74,15 @@ async def agent_chat_sse(
             status_code=400,
             detail=(
                 f"Agentic mode requires an Anthropic API key. "
-                f"Your current provider '{provider}' uses the classic /api/workflow/* endpoints."
+                f"Provider '{provider}' should use the classic /api/workflow/* endpoints."
             ),
         )
 
+    anthropic_api_key: str = session_store.get_api_key(x_session_id)
+    nvidia_api_key: str | None = os.getenv("NVIDIA_API_KEY")
     engine: Engine = request.app.state.db_engine
-    nvidia_api_key = os.getenv("NVIDIA_API_KEY")
 
-    # Create a new research session if none provided
+    # Resolve or create the research session
     research_session_id = request_body.research_session_id
     with engine.connect() as conn:
         if not research_session_id:
@@ -110,21 +97,43 @@ async def agent_chat_sse(
                 raise HTTPException(status_code=404, detail="Research session not found")
 
     async def event_generator():
-        from src.agent.orchestrator import OrchestratorAgent
+        from langchain_core.messages import HumanMessage
+        from src.agent.graph import build_graph
+        from src.agent.streaming import error_event, langgraph_events_to_sse
 
-        with engine.connect() as conn:
-            agent = OrchestratorAgent(
-                anthropic_api_key=anthropic_api_key,
-                nvidia_api_key=nvidia_api_key,
-                research_session_id=research_session_id,
-                conn=conn,
+        try:
+            checkpointer = await _get_checkpointer()
+            graph = build_graph(checkpointer=checkpointer)
+
+            # Initial state for this turn
+            initial_state = {
+                "messages": [HumanMessage(content=request_body.message)],
+                "research_session_id": research_session_id,
+                "auth_session_id": x_session_id,
+                "provider": provider,
+                "model": session_store.get_model(x_session_id),
+                "pipeline_stage": "idle",
+                "delegate_to": None,
+                "sub_agent_output": None,
+                # Pass API keys via state so nodes don't need global env vars
+                "_anthropic_api_key": anthropic_api_key,
+                "_nvidia_api_key": nvidia_api_key,
+            }
+
+            config = {"configurable": {"thread_id": research_session_id}}
+
+            event_stream = graph.astream_events(
+                initial_state,
+                config=config,
+                version="v2",
             )
-            try:
-                async for event in agent.run_streaming(request_body.message):
-                    yield event.to_sse_line()
-            except Exception as e:
-                from src.agent.streaming import error_event
-                yield error_event(str(e)).to_sse_line()
+
+            async for sse_line in langgraph_events_to_sse(event_stream, research_session_id):
+                yield sse_line
+
+        except Exception as e:
+            yield error_event(str(e)).to_sse_line()
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -138,6 +147,12 @@ async def agent_chat_sse(
     )
 
 
+async def _get_checkpointer():
+    """Lazily create the async SQLite checkpointer."""
+    from src.agent.checkpointer import make_async_checkpointer
+    return await make_async_checkpointer()
+
+
 # ---------------------------------------------------------------------------
 # Research session CRUD
 # ---------------------------------------------------------------------------
@@ -148,7 +163,7 @@ async def create_session(
     body: CreateResearchSessionRequest,
     x_session_id: Optional[str] = Header(None),
 ):
-    auth = _require_session(x_session_id)
+    _require_session(x_session_id)
     engine: Engine = request.app.state.db_engine
     with engine.connect() as conn:
         rs_id = create_research_session(
