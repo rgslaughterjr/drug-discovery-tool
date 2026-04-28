@@ -12,7 +12,7 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not rdkit_available,
-    reason="rdkit-pypi not installed — install with: pip install rdkit-pypi",
+    reason="rdkit not installed — install with: pip install rdkit",
 )
 
 from src.agent.tools.rdkit_tools import (

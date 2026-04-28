@@ -42,8 +42,8 @@ cohere>=5.0.0
 sqlalchemy>=2.0.0
 
 # Cheminformatics (PAINS screening, SMILES validation, Murcko scaffolds)
-# Install with: pip install rdkit-pypi
-rdkit-pypi>=2022.9.5
+# Install with: pip install rdkit
+rdkit>=2022.9.5
 
 # Optional: for enhanced Jupyter notebooks
 nbconvert>=7.0.0
