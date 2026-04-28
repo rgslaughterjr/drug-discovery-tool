@@ -5,16 +5,23 @@ Receives the full conversation, decides whether to:
   1. Call a domain tool directly (→ ToolNode)
   2. Delegate to a Nemotron sub-agent  (→ sub-agent node)
   3. Answer directly or ask for clarification (→ END)
+
+Prompt-caching strategy (Anthropic — ~90% discount on cached tokens):
+  Cache breakpoint 1: system message text block (~300 tokens)
+  Cache breakpoint 2: last tool in the tools array (~2,400 tokens total for 16 tools)
+  Combined cached prefix ≈ 2,700 tokens → saves ~2,430 tokens every orchestrator call.
+  Tool schemas and system block are computed once at module import and reused.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Literal, Optional
 
 from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.chat_models import convert_to_anthropic_tool
 from langchain_core.messages import SystemMessage
-from langgraph.prebuilt import ToolNode
+from langchain_core.tools import tool
 
 from src.agent import context as _ctx
 from src.agent.nodes.tools import ALL_TOOLS
@@ -39,12 +46,17 @@ Keep your responses concise. Use structured_result for tabular compound data.
 Do not repeat information the user already provided.
 """
 
-# Delegation tool schema — a synthetic tool that routes to a sub-agent node
-from langchain_core.tools import tool
-from typing import Optional
+# Cache breakpoint 1: system block — marked so Anthropic caches everything up to here.
+# Must be passed as a list of content dicts (not a plain string) for cache_control to work.
+_SYSTEM_BLOCK = [
+    {
+        "type": "text",
+        "text": _ORCHESTRATOR_SYSTEM,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
 
 _MAX_ORCHESTRATOR_TURNS = 6
-# Keep only the most recent N messages in context (trims old tool exchanges)
 _MESSAGE_WINDOW = 20
 
 
@@ -66,24 +78,36 @@ def delegate_to_sub_agent(
     task_description: plain-language description of the task for the sub-agent.
     context: optional dict with known IDs (uniprot_id, pdb_id, chembl_target_id, etc.)
     """
-    # The actual routing happens in the graph edge; this function is never called directly.
-    # It exists so the LLM can produce a tool_call that the router detects.
+    # Routing happens in the graph edge; this function is never called directly.
     return f"Delegating to {agent_name}: {task_description}"
 
 
 ORCHESTRATOR_TOOLS = ALL_TOOLS + [delegate_to_sub_agent]
-_DELEGATION_TOOL_NAMES = {
-    "target_evaluator", "controls_generator", "screening_designer", "hits_analyzer",
-}
+
+# Cache breakpoint 2: pre-format all tool schemas once; mark the last tool so the
+# entire tools array is cached together with the system block.
+# Total cached prefix ≈ system (~300 tok) + tools (~2,400 tok) = ~2,700 tok per call.
+def _build_cached_tool_schemas(tools: list) -> list[dict]:
+    schemas = [convert_to_anthropic_tool(t) for t in tools]
+    if schemas:
+        schemas[-1] = {**schemas[-1], "cache_control": {"type": "ephemeral"}}
+    return schemas
 
 
-def _build_llm(api_key: str, model: str) -> ChatAnthropic:
-    return ChatAnthropic(
+_ORCHESTRATOR_TOOL_SCHEMAS: list[dict] = _build_cached_tool_schemas(ORCHESTRATOR_TOOLS)
+
+
+def _build_llm(api_key: str, model: str):
+    """Build the Sonnet LLM with pre-cached tool schemas."""
+    llm = ChatAnthropic(
         model=model,
         api_key=api_key,
         max_tokens=4096,
         temperature=0,
-    ).bind_tools(ORCHESTRATOR_TOOLS)
+    )
+    # bind() with pre-formatted schemas (including cache_control on last tool)
+    # is equivalent to bind_tools() but avoids re-formatting on every request.
+    return llm.bind(tools=_ORCHESTRATOR_TOOL_SCHEMAS)
 
 
 async def orchestrator_node(state: ResearchState) -> dict:
@@ -97,10 +121,10 @@ async def orchestrator_node(state: ResearchState) -> dict:
     all_messages = list(state["messages"])
     windowed = all_messages[-_MESSAGE_WINDOW:] if len(all_messages) > _MESSAGE_WINDOW else all_messages
 
-    messages = [SystemMessage(content=_ORCHESTRATOR_SYSTEM)] + windowed
+    # SystemMessage with list content → langchain-anthropic passes cache_control through
+    messages = [SystemMessage(content=_SYSTEM_BLOCK)] + windowed
     response = await llm.ainvoke(messages)
 
-    # Check if this is a delegation call — extract the target sub-agent name
     delegate_to = None
     if hasattr(response, "tool_calls") and response.tool_calls:
         for tc in response.tool_calls:
@@ -118,7 +142,6 @@ async def orchestrator_node(state: ResearchState) -> dict:
 
 def route_after_orchestrator(state: ResearchState) -> str:
     """Conditional edge: decide where to go after the orchestrator responds."""
-    # Hard cap — prevent runaway tool-call loops
     if state.get("orchestrator_turns", 0) >= _MAX_ORCHESTRATOR_TURNS:
         return "end"
 
@@ -130,7 +153,6 @@ def route_after_orchestrator(state: ResearchState) -> str:
     if not (hasattr(last, "tool_calls") and last.tool_calls):
         return "end"
 
-    # Delegation takes priority over regular tool calls
     for tc in last.tool_calls:
         if tc["name"] == "delegate_to_sub_agent":
             return tc["args"].get("agent_name", "end")
