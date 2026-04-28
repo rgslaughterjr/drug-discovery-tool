@@ -28,13 +28,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install \
-            pytest pytest-asyncio \
+            pytest \
             requests httpx \
             fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
             sqlalchemy \
             anthropic openai
 
-      # RDKit is optional — tests gracefully skip if not installed
+      # RDKit is optional — tests skip gracefully if not installed
       - name: Install RDKit (optional)
         continue-on-error: true
         run: |
@@ -42,13 +42,15 @@ jobs:
           sudo apt-get install -y libxrender1 libxext6 libxinerama1
           pip install rdkit
 
-      - name: Run unit tests (no external API calls)
-        run: pytest -m "not integration"
+      - name: Run unit tests
+        run: pytest -m "not integration" --tb=long
         env:
           PYTHONPATH: .
 
   # ---------------------------------------------------------------------------
   # Dependency vulnerability scan (Secure SDLC)
+  # Uses a virtual environment so only project packages are audited,
+  # not Ubuntu system packages (cryptography, pip, setuptools, etc.)
   # ---------------------------------------------------------------------------
   security-scan:
     name: Dependency Security Scan
@@ -63,15 +65,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pip-audit and core deps
+      - name: Create isolated venv and install project dependencies
         run: |
-          pip install pip-audit
-          pip install \
+          python -m venv /tmp/audit-venv
+          /tmp/audit-venv/bin/pip install --upgrade pip pip-audit
+          /tmp/audit-venv/bin/pip install \
             fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
             sqlalchemy httpx requests anthropic openai
 
-      - name: Audit installed packages for known CVEs
-        run: pip-audit --skip-editable
+      - name: Audit project dependencies for known CVEs
+        run: /tmp/audit-venv/bin/pip-audit --skip-editable
 
   # ---------------------------------------------------------------------------
   # Secret scanning (Secure SDLC / GitHub secure practices)
