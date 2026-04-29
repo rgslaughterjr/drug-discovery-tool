@@ -3,7 +3,7 @@ Nemotron sub-agent nodes — one per pipeline stage.
 
 Each node:
   1. Extracts the task from the delegate_to_sub_agent tool call in the last message.
-  2. Runs a focused tool-calling loop using NVIDIA Nemotron via NIM (OpenAI-compatible).
+  2. Runs a focused tool-calling loop using Nemotron Super via OpenRouter (OpenAI-compatible).
   3. Returns the structured result as a ToolMessage so the orchestrator sees it,
      plus sets sub_agent_output for the Haiku synthesizer.
 
@@ -29,7 +29,7 @@ from src.agent.nodes.tools import (
 )
 from src.agent.state import ResearchState
 
-_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 _MAX_ITER = 5
 
 
@@ -73,21 +73,22 @@ async def _run_sub_agent(
     state: ResearchState,
 ) -> tuple[dict, str | None]:
     """Core Nemotron tool-calling loop — shared by all four sub-agent nodes."""
-    nvidia_api_key = _ctx.nvidia_key.get() or os.getenv("NVIDIA_API_KEY")
-    if not nvidia_api_key:
+    openrouter_api_key = _ctx.openrouter_key.get() or os.getenv("OPENROUTER_API_KEY")
+    if not openrouter_api_key:
         raise ValueError(
-            "NVIDIA_API_KEY is required for Nemotron sub-agents. "
-            "Set it in your environment or pass it at login."
+            "OPENROUTER_API_KEY is required for Nemotron sub-agents. "
+            "Set it in your environment (get a free key at openrouter.ai)."
         )
-    model_name = os.getenv("SUB_AGENT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
+    base_url = os.getenv("OPENROUTER_BASE_URL", _OPENROUTER_BASE_URL)
+    model_name = os.getenv("SUB_AGENT_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 
     task_description, context, tool_call_id = _extract_task(state)
     system_prompt = _load_prompt(agent_name)
 
     llm = ChatOpenAI(
         model=model_name,
-        base_url=_NIM_BASE_URL,
-        api_key=nvidia_api_key,
+        base_url=base_url,
+        api_key=openrouter_api_key,
         temperature=0,
         max_tokens=4096,
     ).bind_tools(tools)

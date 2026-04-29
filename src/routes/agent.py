@@ -96,7 +96,7 @@ async def agent_chat_sse(
         )
 
     anthropic_api_key: str = session_store.get_api_key(x_session_id)
-    nvidia_api_key: str | None = os.getenv("NVIDIA_API_KEY")
+    openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     engine: Engine = request.app.state.db_engine
 
     # Resolve or create the research session
@@ -121,7 +121,7 @@ async def agent_chat_sse(
         # Set per-request context vars — keys are never written to LangGraph state
         # or checkpointed to SQLite, and are invisible to LangSmith.
         _ctx.anthropic_key.set(anthropic_api_key)
-        _ctx.nvidia_key.set(nvidia_api_key)
+        _ctx.openrouter_key.set(openrouter_api_key)
 
         try:
             async with asyncio.timeout(90):
