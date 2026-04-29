@@ -4,18 +4,19 @@
       {
         "name": "Start FastAPI Backend",
         "command": "uvicorn src.main:app --reload --port 8000",
-        "shell": "bash",
         "runInBackground": true,
-        "description": "Start the FastAPI backend on port 8000"
+        "description": "FastAPI backend on http://localhost:8000"
       },
       {
         "name": "Start React Dev Server",
-        "command": "cd web && npm install && npm start",
-        "shell": "bash",
+        "command": "cd web && npm install --silent && BROWSER=none PORT=3000 npm start",
         "runInBackground": true,
-        "description": "Install dependencies and start React dev server on port 3000"
+        "description": "React frontend on http://localhost:3000"
       }
     ]
+  },
+  "preview": {
+    "url": "http://localhost:3000"
   },
   "permissions": {
     "bash": {

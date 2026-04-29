@@ -1,6 +1,6 @@
 # Deployment Guide: Drug Discovery Web UI Agent
 
-## Quick Start (Local Development)
+## Local Development
 
 ### Prerequisites
 ```bash

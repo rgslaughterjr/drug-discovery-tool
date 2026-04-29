@@ -1,0 +1,54 @@
+.agent-thinking {
+  background: #f0f4ff;
+  border: 1px solid #c5d2f6;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.sub-agent-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4c51bf;
+  font-size: 13px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4c51bf;
+  animation: pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+.thinking-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.thinking-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.thinking-step.calling { color: #6366f1; }
+.thinking-step.done { color: #059669; }
+
+.step-icon { width: 14px; text-align: center; }
+.step-db { font-weight: 600; min-width: 70px; }
+.step-tool { color: #6b7280; font-family: monospace; }
+.step-duration { color: #9ca3af; margin-left: auto; }
+.step-summary { color: #374151; font-style: italic; margin-left: 4px; }

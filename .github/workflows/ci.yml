@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  workflow_dispatch:
+    # Restore push/pull_request triggers when ready to run CI automatically
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Unit Tests
+  # ---------------------------------------------------------------------------
+  test:
+    name: Backend Unit Tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install core test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            pytest \
+            requests httpx \
+            fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
+            sqlalchemy aiosqlite \
+            anthropic openai \
+            langgraph langchain-core langchain-anthropic langchain-openai langsmith
+
+      # RDKit is optional — tests skip gracefully if not installed
+      - name: Install RDKit (optional)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libxrender1 libxext6 libxinerama1
+          pip install rdkit
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Run unit tests
+        run: pytest -m "not integration" --tb=long -v
+        env:
+          PYTHONPATH: .
+
+  # ---------------------------------------------------------------------------
+  # Dependency vulnerability scan (Secure SDLC)
+  # Uses a virtual environment so only project packages are audited,
+  # not Ubuntu system packages (cryptography, pip, setuptools, etc.)
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create isolated venv and install project dependencies
+        run: |
+          python -m venv /tmp/audit-venv
+          /tmp/audit-venv/bin/pip install --upgrade pip pip-audit
+          /tmp/audit-venv/bin/pip install \
+            fastapi "uvicorn[standard]" pydantic python-multipart aiofiles \
+            sqlalchemy aiosqlite httpx requests anthropic openai \
+            langgraph langchain-core langchain-anthropic langchain-openai langsmith
+
+      - name: Audit project dependencies for known CVEs
+        run: /tmp/audit-venv/bin/pip-audit --skip-editable
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning (Secure SDLC / GitHub secure practices)
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout (full history for trufflehog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: master
+          head: HEAD
+          extra_args: --only-verified

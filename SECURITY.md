@@ -277,8 +277,8 @@ A: No. Chat history exists only in your browser's memory. Close the tab → hist
 **Q: What data does the LLM provider see?**
 A: Only what you send in your prompts (e.g., "Evaluate Staphylococcus aureus GyrB"). The provider sees your input but NOT your API key (handled by their API client).
 
-**Q: Can I use this with institutional keys?**
-A: Yes! If your institution provides shared API keys (e.g., university Anthropic account), you can use them. Just treat the key with the same care as a personal key.
+**Q: Can I use this with shared or team keys?**
+A: Yes. Shared API keys work the same way — just treat them with the same care as a personal key and ensure only authorized users have access.
 
 **Q: Is this suitable for sensitive data?**
 A: Use caution. The app is designed for scientific/research data. Avoid sending:

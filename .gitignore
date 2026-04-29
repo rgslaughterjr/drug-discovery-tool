@@ -74,3 +74,11 @@ secrets/
 *.pid
 backend.log
 frontend.log
+
+# SQLite database and local data (never commit user research data)
+data/
+*.db
+*.sqlite
+
+# mkcert locally-trusted certificates
+dev/certs/
