@@ -1,58 +1,30 @@
-# Core dependencies
-python-dotenv>=1.0.0
-jupyter>=1.0.0
-ipython>=8.0.0
-
 # FastAPI backend
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 python-multipart>=0.0.6
 aiofiles>=23.0.0
+python-dotenv>=1.0.0
 
-# HTTP client
+# HTTP clients
 requests>=2.31.0
 httpx>=0.25.0
 
-# LLM Provider Support
-# Install only the packages for providers you'll use
-
-# Anthropic (Direct API) - recommended for UT Austin
-anthropic>=0.29.0
-
-# AWS Bedrock (if institutional AWS account available)
-boto3>=1.28.0
-
-# OpenAI (including Azure OpenAI via base_url)
-openai>=1.3.0
-
-# Google Gemini
-google-generativeai>=0.3.0
-
-# Cohere
-cohere>=5.0.0
-
-# Together.ai
-# (uses openai package for compatibility)
-
-# Ollama (local LLMs)
-# (uses openai package for compatibility)
-
-# Agentic system — database persistence
-sqlalchemy>=2.0.0
-aiosqlite>=0.19.0
-
-# LangGraph + LangChain (orchestrator, sub-agents, LangSmith tracing)
+# Agentic system — LangGraph orchestrator, Nemotron sub-agents, LangSmith tracing
 langgraph>=0.2.0
 langchain-core>=0.3.0
 langchain-anthropic>=0.2.0
 langchain-openai>=0.2.0
 langsmith>=0.1.0
 
-# Cheminformatics (PAINS screening, SMILES validation, Murcko scaffolds)
+# LLM provider SDKs
+anthropic>=0.29.0
+openai>=1.3.0
+
+# Database persistence (SQLite via SQLAlchemy)
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+
+# Cheminformatics — PAINS screening, SMILES validation, Murcko scaffolds
 # Install with: pip install rdkit
 rdkit>=2022.9.5
-
-# Optional: for enhanced Jupyter notebooks
-nbconvert>=7.0.0
-matplotlib>=3.5.0

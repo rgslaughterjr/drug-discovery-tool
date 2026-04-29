@@ -1,6 +1,6 @@
 # Testing Guide: Drug Discovery Web UI Agent
 
-## Quick Start (Local Development)
+## Local Development
 
 ### Prerequisites
 - Python 3.8+

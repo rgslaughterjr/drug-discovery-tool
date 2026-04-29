@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: [master]
+  workflow_dispatch:
+    # Restore push/pull_request triggers when ready to run CI automatically
 
 jobs:
   # ---------------------------------------------------------------------------

@@ -1,237 +1,64 @@
-# Drug Discovery Pipeline: AI-Augmented Virtual Screening
+# Drug Discovery Agent — Internal Reference
 
-**An AI-assisted computational workflow for discovering novel small-molecule therapeutics against bacterial and protozoan parasitic pathogens.**
-
-This tool implements a four-phase drug discovery pipeline:
-
-1. **Target Evaluation** — Assess a protein as a viable drug target
-2. **Validation Controls** — Generate known binders and decoys for docking validation
-3. **Screening Preparation** — Design pharmacophore-based ChemBridge Diversity screening
-4. **Hit Analysis** — Prioritize and rank virtual screening hits for wet-lab testing
+> **Status: Active development. Not production-ready.**
+> This document is an internal reference for development and debugging.
 
 ---
 
-## Quick Start (Anthropic Direct API)
+## System Overview
 
-**For development or academic use with your own API key:**
+A four-stage AI-augmented virtual screening pipeline implemented as a LangGraph `StateGraph`. The orchestrator (Claude Sonnet) routes user requests to domain tools or Nemotron sub-agents, which query real public databases (PubChem, ChEMBL, UniProt, RCSB PDB) and run local cheminformatics (RDKit). Claude Haiku synthesizes sub-agent results into concise researcher-facing prose.
 
-```bash
-# Clone and setup
-git clone https://github.com/yourusername/drug-discovery-tool.git
-cd drug-discovery-tool
-pip install -r requirements.txt
-
-# Set your API key
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Run a workflow
-jupyter notebook workflows/01_evaluate_target.ipynb
-```
+The web UI is a React/TypeScript chat interface backed by a FastAPI SSE stream. Conversation state persists across sessions via SQLite (LangGraph `AsyncSqliteSaver`). LangSmith traces are emitted automatically when `LANGCHAIN_TRACING_V2=true`.
 
 ---
 
-## Setup: Two Options
+## Architecture
 
-### Option A: Anthropic Direct API (Recommended for UT Austin faculty)
+```
+User (React — SSE)
+  └── OrchestratorNode  [claude-sonnet-4-6]
+        ├── ToolNode  (regular DB + RDKit calls)
+        │     ├── PubChem REST    — compound lookup, similarity, bioactivity
+        │     ├── ChEMBL REST     — target search, IC50/Ki data
+        │     ├── UniProt REST    — protein function, GO terms, essentiality
+        │     ├── RCSB PDB REST   — structure search, binding site residues
+        │     └── RDKit (local)   — SMILES validation, PAINS, Murcko scaffolds
+        │
+        └── Sub-Agent Nodes  [nvidia/llama-3.1-nemotron-70b-instruct via NIM]
+              ├── target_evaluator   — UniProt + PDB druggability
+              ├── controls_generator — ChEMBL + PubChem IC50-verified controls
+              ├── screening_designer — PDB binding site pharmacophore design
+              └── hits_analyzer      — hit prioritization + PAINS + scaffold
+                    └── SynthesizerNode  [claude-haiku-4-5-20251001]
+```
 
-**Best for:** Lab owners with institutional compute budgets or NSF/DOE grants.
+### Graph nodes
 
-**Cost:** Pay-as-you-go via [Anthropic Console](https://console.anthropic.com). Approximately **$0.50–$2.00 per workflow execution** depending on target complexity.
+| Node | Model | Max tokens | Purpose |
+|------|-------|-----------|---------|
+| `orchestrator` | `claude-sonnet-4-6` | 4096 | Routes, calls tools, delegates |
+| `tools` | — | — | `ToolNode` executing DB/RDKit calls |
+| `target_evaluator` | Nemotron-70b | 4096 | UniProt + PDB druggability loop |
+| `controls_generator` | Nemotron-70b | 4096 | ChEMBL/PubChem control generation |
+| `screening_designer` | Nemotron-70b | 4096 | Pharmacophore + binding site |
+| `hits_analyzer` | Nemotron-70b | 4096 | Hit ranking + PAINS filter |
+| `synthesizer` | `claude-haiku-4-5-20251001` | 512 | Formats sub-agent JSON → prose |
 
-**Setup (3 steps):**
+**Prompt caching:** The orchestrator's system message (~300 tok) + 16 tool schemas (~1,700 tok) = ~2,000 cached tokens per call at ~10% cost (Anthropic ephemeral cache, 5-min TTL).
 
-1. **Get API key:**
-   - Create account at https://console.anthropic.com
-   - Generate API key in Settings > API Keys
-   - Copy the `sk-ant-...` key
-
-2. **Set environment variable:**
-   ```bash
-   export ANTHROPIC_API_KEY="sk-ant-..."
-   ```
-   
-   Or add to `~/.bashrc` / `~/.zshrc` for persistence:
-   ```bash
-   echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.bashrc
-   source ~/.bashrc
-   ```
-
-3. **Verify:**
-   ```bash
-   python -c "from src import DrugDiscoveryClient; print('✓ API configured')"
-   ```
+**Runaway protection:** Orchestrator hard-caps at 6 turns per request (`orchestrator_turns` in `ResearchState`). Sub-agents cap at 5 tool-call iterations.
 
 ---
 
-### Option B: AWS Bedrock (If UT Austin has institutional account)
+## Four Pipeline Stages
 
-**Best for:** Institutions with existing AWS contracts or CloudTrail audit requirements.
-
-**Cost:** Potentially discounted if UT Austin has institutional pricing agreement with AWS.
-
-**Setup (5 steps):**
-
-1. **Verify AWS access:**
-   ```bash
-   aws sts get-caller-identity
-   ```
-   If this fails, you don't have AWS credentials configured. Skip this option.
-
-2. **Enable Bedrock model access** (one-time in AWS Console):
-   - Go to https://console.aws.amazon.com/bedrock/
-   - Regions > us-west-2 (or your region)
-   - Model access > Enable "Claude 3.5 Sonnet"
-
-3. **Configure environment:**
-   ```bash
-   export DISCOVERY_PROVIDER="bedrock"
-   export AWS_REGION="us-west-2"
-   # AWS credentials auto-loaded from ~/.aws/credentials
-   ```
-
-4. **Verify:**
-   ```bash
-   python -c "from src import DrugDiscoveryClient; print('✓ Bedrock configured')"
-   ```
-
-5. **Check billing** in AWS Console > Bedrock > Usage.
-
----
-
-### Option C: UT Austin Institutional Partnership (Contact Anthropic directly)
-
-**Best for:** Long-term, high-volume research collaborations.
-
-**Action:**
-- Contact Anthropic Research Partnerships: partnerships@anthropic.com
-- Reference: "Academic research partnership inquiry - UT Austin drug discovery lab"
-- Mention: Expected annual API usage, research scope, publication plans
-
-Anthropic may offer discounted research credits or direct partnership terms.
-
----
-
-## Development vs. Deployment
-
-### **For Your Iterations (In This Claude Project)**
-
-Use your own Anthropic API key. You're in development mode:
-
-```bash
-# You iterate with:
-export ANTHROPIC_API_KEY="sk-ant-..."
-python -m jupyter lab  # or notebook
-# Each execution is your cost
-```
-
-### **For Lab Owner Deployment**
-
-He uses his own key (via BYOK pattern):
-
-```bash
-# Lab owner sets THEIR key:
-export ANTHROPIC_API_KEY="sk-ant-..." # His key, his cost
-
-# Or (for Bedrock):
-export DISCOVERY_PROVIDER="bedrock"   # Uses his AWS account
-
-# Runs notebooks:
-jupyter notebook workflows/
-```
-
-**Key principle:** Each user's API key = each user's billing. No bill pass-through.
-
----
-
-## Workflows
-
-### Workflow 1: Evaluate a Target Protein
-
-**File:** `workflows/01_evaluate_target.ipynb`
-
-**Input:**
-```
-Organism: Staphylococcus aureus
-Protein: DNA gyrase subunit B (GyrB)
-Optional: UniProt ID or PDB code
-```
-
-**Output:**
-- Five-criterion assessment (essentiality, structure, assay, purification, novelty)
-- GO/NO-GO recommendation with justification
-- Suggested alternatives if NO-GO
-
-**Runtime:** ~60 seconds
-
----
-
-### Workflow 2: Generate Validation Controls
-
-**File:** `workflows/02_generate_controls.ipynb`
-
-**Input:**
-```
-Organism: Staphylococcus aureus
-Protein: DNA gyrase subunit B
-PDB ID: 4P8O
-```
-
-**Output:**
-- 10 positive controls (known binders with IC₅₀/K_i data)
-- 10 property-matched negative controls (DUD-E decoys)
-- SMILES strings, PubChem CIDs, molecular properties
-- Literature references for all compounds
-
-**Runtime:** ~90 seconds
-
----
-
-### Workflow 3: Prepare Screening Campaign
-
-**File:** `workflows/03_prepare_screening.ipynb`
-
-**Input:**
-```
-Organism: Plasmodium falciparum
-Protein: Dihydrofolate reductase (DHFR)
-PDB ID: 1J3I
-Mechanism: Competitive NADPH inhibition
-Docking software: Autodock Vina (or DOCK6 / Glide / rDock)
-```
-
-**Output:**
-- Ranked pharmacophore features
-- Physicochemical filter cutoffs (MW, LogP, TPSA, HBD/HBA)
-- PAINS exclusion rules
-- ZINC20 query with SMARTS filters
-- Estimated library size after filtering
-- Post-screening hit prioritization strategy
-
-**Runtime:** ~120 seconds
-
----
-
-### Workflow 4: Analyze Virtual Screening Hits
-
-**File:** `workflows/04_analyze_hits.ipynb`
-
-**Input:**
-```
-Protein: S. aureus GyrB
-Compounds screened: 180,000
-Docking score distribution summary
-Positive control affinity values (optional)
-```
-
-**Output:**
-- Score cutoff determination (anchored to positive controls)
-- Murcko scaffold clustering
-- PAINS re-filtering results
-- Selectivity cross-check strategy
-- Prioritized purchase list (top 10–20 compounds)
-- Visual inspection checklist for medicinal chemist
-
-**Runtime:** ~90 seconds
+| Stage | Trigger phrase | Sub-agent | Key tools |
+|-------|---------------|-----------|-----------|
+| Evaluate Target | "evaluate [protein]" | `target_evaluator` | `uniprot_search`, `pdb_structure_search` |
+| Generate Controls | "generate controls" / "find inhibitors" | `controls_generator` | `chembl_bioactivity`, `pubchem_compound_lookup`, `screen_pains`, `generate_decoys` |
+| Prepare Screening | "design screening" / "pharmacophore" | `screening_designer` | `pdb_binding_site_info`, `calculate_molecular_properties` |
+| Analyze Hits | "analyze hits" / "rank compounds" | `hits_analyzer` | `pubchem_compound_lookup`, `compute_murcko_scaffolds`, `screen_pains` |
 
 ---
 
@@ -240,205 +67,218 @@ Positive control affinity values (optional)
 ```
 drug-discovery-tool/
 ├── src/
-│   ├── __init__.py              # Package initialization
-│   ├── api_client.py            # Unified API client (Anthropic + Bedrock)
-│   └── config.py                # Configuration loader
+│   ├── agent/
+│   │   ├── context.py          # Per-request ContextVar for API keys (never in state)
+│   │   ├── graph.py            # StateGraph topology + build_graph()
+│   │   ├── state.py            # ResearchState TypedDict
+│   │   ├── checkpointer.py     # Singleton AsyncSqliteSaver
+│   │   ├── streaming.py        # SSEEvent + langgraph_events_to_sse()
+│   │   ├── nodes/
+│   │   │   ├── orchestrator.py # Claude Sonnet node + route_after_orchestrator()
+│   │   │   ├── sub_agents.py   # Four Nemotron nodes + parallel tool execution
+│   │   │   ├── synthesizer.py  # Claude Haiku node
+│   │   │   └── tools.py        # @tool wrappers + per-sub-agent subsets
+│   │   └── tools/
+│   │       ├── pubchem.py      # PubChem REST calls (trimmed responses)
+│   │       ├── chembl.py       # ChEMBL REST calls
+│   │       ├── uniprot.py      # UniProt REST calls
+│   │       ├── pdb.py          # RCSB PDB REST calls
+│   │       └── rdkit_tools.py  # SMILES validation, PAINS, Murcko, decoys
+│   ├── database/
+│   │   ├── models.py           # SQLAlchemy table definitions
+│   │   ├── session_db.py       # ResearchSession CRUD
+│   │   ├── conversation_db.py  # ConversationTurn CRUD
+│   │   └── results_db.py       # WorkflowResult + VerifiedCompound CRUD
+│   ├── routes/
+│   │   ├── agent.py            # POST /api/agent/chat (SSE) + research session CRUD
+│   │   ├── export.py           # GET /api/export/{id}/compounds.csv + /results.json
+│   │   ├── session.py          # Auth session create/validate/delete
+│   │   ├── models.py           # GET /api/models/available
+│   │   └── workflows.py        # Legacy /api/workflow/* endpoints
+│   ├── workflows/              # Legacy Python workflow functions (non-agentic)
+│   │   ├── evaluate_target.py
+│   │   ├── get_controls.py
+│   │   ├── prep_screening.py
+│   │   └── analyze_hits.py
+│   ├── main.py                 # FastAPI app, CORS, startup SQLite init
+│   ├── session_manager.py      # In-memory auth session store (30-min TTL)
+│   ├── api_client.py           # Legacy multi-provider LLM client
+│   └── config.py               # Environment variable loader
 ├── prompts/
-│   ├── evaluate_target_system.txt      # System prompt for target evaluation
-│   ├── get_controls_system.txt         # System prompt for controls
-│   ├── chembridge_prep_system.txt      # System prompt for screening prep
-│   └── hit_analysis_system.txt         # System prompt for hit analysis
-├── workflows/
-│   ├── 01_evaluate_target.ipynb        # Interactive Jupyter notebook
-│   ├── 02_generate_controls.ipynb
-│   ├── 03_prepare_screening.ipynb
-│   └── 04_analyze_hits.ipynb
-├── examples/
-│   ├── gyrb_evaluation.json            # Example outputs
-│   ├── gyrb_controls.json
-│   ├── pfddhfr_screening_brief.json
-│   └── gyrb_hits_analysis.json
-├── requirements.txt             # Python dependencies
-├── README.md                    # This file
-└── .env.example                 # Environment variable template
+│   ├── orchestrator_system.txt
+│   ├── sub_agent_target.txt
+│   ├── sub_agent_controls.txt
+│   ├── sub_agent_screening.txt
+│   └── sub_agent_hits.txt
+├── web/                        # React/TypeScript frontend
+│   └── src/
+│       ├── components/         # ChatInterface, LoginModal, SessionBadge, etc.
+│       ├── context/            # SessionContext
+│       ├── hooks/              # useAgentStream, useSessionCleanup
+│       └── utils/              # apiClient, sseParser
+├── tests/
+│   ├── agent/                  # Graph routing + state tests
+│   ├── database/               # CRUD unit tests
+│   ├── routes/                 # FastAPI route tests (TestClient)
+│   └── tools/                  # RDKit + streaming tests
+├── dev/                        # Local dev environment
+│   ├── docker-compose.dev.yml
+│   ├── nginx.conf
+│   └── setup-local-env.sh
+├── .env.example                # All environment variable templates
+├── requirements.txt
+└── pytest.ini
 ```
 
 ---
 
-## Cost Estimation
+## Environment Variables
 
-**Anthropic Direct API pricing (as of 2025):**
-- Input: $3.00 / 1M tokens
-- Output: $15.00 / 1M tokens
+Copy `.env.example` to `.env` and fill in values.
 
-**Per-workflow cost:**
-| Workflow | Approx. tokens | Est. cost |
-|----------|----------------|-----------|
-| Evaluate target | 3,000 | $0.05 |
-| Generate controls | 5,000 | $0.10 |
-| Prepare screening | 6,000 | $0.12 |
-| Analyze hits | 4,000 | $0.08 |
-| **Full pipeline** | **18,000** | **$0.35** |
-
-**Annual cost estimate (50 target evaluations):**
-- ~900 tokens × 50 evaluations = ~45K tokens
-- Cost: ~$0.13–$0.25/month
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | — | Orchestrator + Haiku synthesizer |
+| `NVIDIA_API_KEY` | Yes | — | Nemotron sub-agents via NIM free tier |
+| `LANGCHAIN_TRACING_V2` | No | `false` | Enable LangSmith tracing |
+| `LANGCHAIN_API_KEY` | If tracing | — | LangSmith key (`ls__...`) |
+| `LANGCHAIN_PROJECT` | No | `drug-discovery-tool` | LangSmith project name |
+| `ORCHESTRATOR_MODEL` | No | `claude-sonnet-4-6` | Override orchestrator model |
+| `SUB_AGENT_MODEL` | No | `nvidia/llama-3.1-nemotron-70b-instruct` | Override Nemotron model |
+| `HAIKU_MODEL` | No | `claude-haiku-4-5-20251001` | Override synthesizer model |
+| `DB_PATH` | No | `./data/research.db` | SQLite file path |
+| `REACT_APP_API_URL` | No | `http://localhost:8000` | Frontend → backend URL |
 
 ---
 
-## API Reference
+## Running Locally
 
-### Instantiate Client
-
-```python
-from src import DrugDiscoveryClient, APIConfig
-
-# With explicit config
-config = APIConfig(
-    provider="anthropic",
-    api_key="sk-ant-...",
-    model="claude-3-5-sonnet-20241022"
-)
-client = DrugDiscoveryClient(config=config)
-
-# Or auto-load from environment
-client = DrugDiscoveryClient()
-```
-
-### Evaluate Target
-
-```python
-result = client.evaluate_target(
-    organism="Staphylococcus aureus",
-    protein_name="DNA gyrase subunit B",
-    protein_id="GyrB"  # optional
-)
-print(result["response"])
-```
-
-### Generate Controls
-
-```python
-result = client.get_controls(
-    organism="Staphylococcus aureus",
-    protein_name="DNA gyrase subunit B",
-    pdb_id="4P8O"
-)
-print(result["response"])
-```
-
-### Prepare Screening
-
-```python
-result = client.prep_screening(
-    organism="Plasmodium falciparum",
-    protein_name="Dihydrofolate reductase",
-    pdb_id="1J3I",
-    mechanism="Competitive NADPH inhibition",
-    docking_software="Autodock Vina"
-)
-print(result["response"])
-```
-
-### Analyze Hits
-
-```python
-result = client.analyze_hits(
-    protein_name="S. aureus GyrB",
-    num_compounds=180000,
-    docking_scores_summary="Mean: -8.2, SD: 1.1, Range: [-12.5, -4.3]",
-    positive_controls_affinity="SPR720: 0.063 µM, Clorobiocin: 0.024 µM"
-)
-print(result["response"])
-```
-
----
-
-## Troubleshooting
-
-### "ANTHROPIC_API_KEY not set"
+**Prerequisites:** Python 3.11+, Node 18+
 
 ```bash
-# Verify key is exported
-echo $ANTHROPIC_API_KEY
+# 1. Install Python dependencies
+pip install -r requirements.txt
 
-# If empty, set it
-export ANTHROPIC_API_KEY="sk-ant-..."
+# 2. Copy and fill in environment variables
+cp .env.example .env
+# Edit .env — at minimum set ANTHROPIC_API_KEY and NVIDIA_API_KEY
 
-# For persistence, add to ~/.bashrc or ~/.zshrc
+# 3. Start FastAPI backend (port 8000, hot-reload)
+uvicorn src.main:app --reload --port 8000
+
+# 4. In a second terminal — start React dev server (port 3000)
+cd web && npm install && BROWSER=none npm start
 ```
 
-### "AWS credentials not found" (Bedrock mode)
+Both servers are also started automatically on Claude Code Desktop session start via `.claude/settings.json` hooks, with the Preview pane pointing at `http://localhost:3000`.
+
+Health check: `curl http://localhost:8000/health` → `{"status":"ok","version":"2.0.0"}`
+
+---
+
+## API Endpoints
+
+### Agentic (Anthropic only)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/agent/chat` | SSE stream — LangGraph orchestrator turn |
+| `POST` | `/api/agent/research-sessions` | Create research session |
+| `GET` | `/api/agent/research-sessions` | List sessions for auth session |
+| `GET` | `/api/agent/research-sessions/{id}` | Session detail + conversation length |
+| `DELETE` | `/api/agent/research-sessions/{id}` | Delete session |
+| `GET` | `/api/export/{id}/compounds.csv` | Download verified compounds as CSV |
+| `GET` | `/api/export/{id}/results.json` | Download full workflow results as JSON |
+
+### Legacy (all providers)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/session/create` | Create auth session (returns session ID) |
+| `GET` | `/session/{id}/validate` | Check session validity + TTL |
+| `DELETE` | `/session/{id}` | Delete auth session |
+| `GET` | `/api/models/available` | List supported providers + models |
+| `POST` | `/api/workflow/evaluate-target` | Legacy single-call evaluate |
+| `POST` | `/api/workflow/get-controls` | Legacy single-call controls |
+| `POST` | `/api/workflow/prep-screening` | Legacy single-call screening |
+| `POST` | `/api/workflow/analyze-hits` | Legacy single-call hits |
+
+All protected endpoints require `X-Session-ID` header.
+
+### SSE event format (`/api/agent/chat`)
+
+```json
+{"type": "thinking",          "tool": "chembl_bioactivity", "status": "calling"}
+{"type": "tool_result",       "tool": "chembl_bioactivity", "data": {}, "duration_ms": 420}
+{"type": "text_delta",        "content": "Found 14 inhibitors..."}
+{"type": "sub_agent_delegated","agent": "controls_generator", "status": "running"}
+{"type": "structured_result", "result_type": "compound_table", "data": [...]}
+{"type": "error",             "message": "ChEMBL API timeout"}
+{"type": "done",              "research_session_id": "abc-123"}
+```
+
+---
+
+## Database Schema
+
+Four SQLite tables defined in `src/database/models.py`:
+
+```
+research_sessions
+  id (UUID PK), auth_session_id (idx), name, organism, target_protein,
+  uniprot_id, pdb_id, chembl_target_id, pipeline_stage,
+  created_at, last_active_at, provider, model
+
+conversation_turns
+  id (INT PK), research_session_id (FK→cascade), turn_index,
+  role ("user"|"assistant"), content_json (TEXT), is_compressed (BOOL),
+  created_at
+
+workflow_results
+  id (UUID PK), research_session_id (FK→cascade), workflow_type,
+  result_json (TEXT), tool_calls_json (TEXT audit log),
+  model_used, created_at, is_verified (BOOL)
+
+verified_compounds
+  id (INT PK), workflow_result_id (FK), research_session_id (FK→cascade),
+  compound_type ("positive_control"|"negative_control"|"hit"),
+  name, pubchem_cid, chembl_id, smiles, canonical_smiles,
+  mw, logp, tpsa, hbd, hba, activity_value_nm, activity_type,
+  is_pains, pains_alerts, docking_score, rank, notes
+```
+
+---
+
+## Cost Profile
+
+Estimated token usage per full 4-stage agentic pipeline run:
+
+| Stage | Orchestrator | Sub-agent (Nemotron) | Synthesizer (Haiku) |
+|-------|-------------|---------------------|---------------------|
+| Evaluate Target | ~800 tok | ~3,000 tok (free NIM) | ~300 tok |
+| Generate Controls | ~800 tok | ~6,000 tok (free NIM) | ~400 tok |
+| Prepare Screening | ~800 tok | ~4,000 tok (free NIM) | ~350 tok |
+| Analyze Hits | ~800 tok | ~4,000 tok (free NIM) | ~350 tok |
+
+Orchestrator prompt caching (~2,000 tokens cached per turn at ~10% cost) reduces effective Sonnet input cost by ~70% on multi-turn conversations. Nemotron sub-agent calls are free under NVIDIA NIM's free tier. Haiku synthesis is the cheapest Anthropic model.
+
+Rough full-pipeline cost (Anthropic tokens only): **$0.05–$0.15** depending on target complexity and number of follow-up questions.
+
+---
+
+## Running Tests
 
 ```bash
-# Check AWS configuration
-aws sts get-caller-identity
+# All unit tests (excludes integration tests that hit live APIs)
+pytest -m "not integration" -v
 
-# If fails, configure credentials
-aws configure
+# Specific test modules
+pytest tests/agent/ -v
+pytest tests/database/ -v
+pytest tests/routes/ -v
 
-# Or set directly
-export AWS_ACCESS_KEY_ID="..."
-export AWS_SECRET_ACCESS_KEY="..."
+# RDKit tests (requires rdkit installed)
+pytest tests/tools/test_rdkit_tools.py -v
 ```
 
-### "Model access not enabled" (Bedrock mode)
-
-Go to AWS Console > Bedrock > Model access and enable "Claude 3.5 Sonnet" in your region.
-
-### Slow responses
-
-- First call to Bedrock may take 5–10 seconds (cold start)
-- Anthropic Direct API typically responds in 2–5 seconds
-- Check internet connection and API quota
-
----
-
-## Contributing
-
-For improvements, bug reports, or new workflows:
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-workflow`
-3. Commit changes: `git commit -m "Add [workflow] for [task]"`
-4. Push to branch: `git push origin feature/my-workflow`
-5. Submit a pull request
-
----
-
-## Citation
-
-If you use this pipeline in published research, please cite:
-
-```bibtex
-@software{drug_discovery_pipeline_2025,
-  title={Drug Discovery Pipeline: AI-Augmented Virtual Screening},
-  author={[Your Name]},
-  year={2025},
-  url={https://github.com/yourusername/drug-discovery-tool},
-  note={Computational drug discovery framework}
-}
-```
-
----
-
-## License
-
-MIT License — See LICENSE file for details.
-
----
-
-## Contact
-
-For questions or support:
-- **PI/Lab Owner:** [Contact]
-- **Technical issues:** [GitHub Issues]
-- **Anthropic Support:** support@anthropic.com (if using Direct API)
-
----
-
-## Acknowledgments
-
-Built for the [Lab Name] at The University of Texas at Austin.
-
-Designed for advanced undergraduate researchers performing real drug discovery against infectious disease targets.
+CI is currently paused (`workflow_dispatch` only). Re-enable by restoring `push`/`pull_request` triggers in `.github/workflows/ci.yml`.
